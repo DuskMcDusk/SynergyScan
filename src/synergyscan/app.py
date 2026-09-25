@@ -70,8 +70,11 @@ state = State()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state.printer.start()
-    log.info("release %s listening on %s:%s", relver.current(),
-             state.settings.host, state.settings.port)
+    # Deliberately no address here: a --port override never reaches Settings,
+    # so logging the configured port claimed 8000 while uvicorn was on
+    # something else. Uvicorn logs the address it actually bound; this line
+    # carries the release, which is what a support log is really missing.
+    log.info("release %s ready (data: %s)", relver.current(), paths.data_dir())
     try:
         yield
     finally:

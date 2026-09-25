@@ -38,6 +38,7 @@ param(
     [string]$Channel     = 'stable',
     [string]$PythonVersion = '3.12',
     [switch]$NoAutostart,
+    [switch]$NoShortcuts,
     [switch]$NoStart
 )
 
@@ -91,7 +92,16 @@ if (Test-Path $uvExe) {
     Copy-Item $found.FullName $uvExe -Force
     Remove-Item -Recurse -Force $uvTmp, $uvZip -ErrorAction SilentlyContinue
 }
-& $uvExe python install $PythonVersion 2>&1 | Out-Null
+# Do NOT add "2>&1" here. In Windows PowerShell 5.1, redirecting a native
+# command's stderr wraps every line in an ErrorRecord, and with
+# $ErrorActionPreference = 'Stop' that aborts the script. uv reports download
+# progress on stderr, so this failed on any machine that did not already have
+# this Python cached - which is every fresh machine. Let it print; watching a
+# 21 MB download is better for the person installing anyway.
+& $uvExe python install $PythonVersion
+if ($LASTEXITCODE -ne 0) {
+    Fail "Could not install Python $PythonVersion. Check the internet connection."
+}
 Good "uv ready, Python $PythonVersion available"
 
 # --------------------------------------------------------------- 3. channel
@@ -209,9 +219,19 @@ sh.Run """$InstallRoot\uv.exe"" run --no-project --python $PythonVersion launche
 Good 'launcher installed'
 
 # ------------------------------------------------------------- 10. shortcuts
+$vbs = Join-Path $InstallRoot 'SynergyScan.vbs'
+
+# -NoShortcuts exists so a test install can sit beside a real one. Both
+# shortcuts have fixed names, so without it a second install silently
+# repoints the operator's desktop icon at the test folder - and they would
+# have no way of knowing which one they were using.
+if ($NoShortcuts) {
+    Step 'Skipping shortcuts (-NoShortcuts)'
+    Say "Start this install with: wscript `"$vbs`""
+} else {
+
 Step 'Adding shortcuts'
 $shell = New-Object -ComObject WScript.Shell
-$vbs = Join-Path $InstallRoot 'SynergyScan.vbs'
 
 $desktop = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'SynergyScan.lnk'))
 $desktop.TargetPath = $vbs
@@ -232,6 +252,8 @@ if (-not $NoAutostart) {
     Good 'starts automatically when you log on'
 }
 
+}   # end of -NoShortcuts
+
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 
 # ----------------------------------------------------------------- 11. start
@@ -240,8 +262,12 @@ Write-Host '  Installed.' -ForegroundColor Green
 Say "Version    $version"
 Say "Folder     $InstallRoot"
 Say "Data       $InstallRoot\data   (the database lives here - back this up)"
-Say 'Open with  the SynergyScan icon on the desktop'
-Say '           or http://localhost:8000 in a browser'
+if ($NoShortcuts) {
+    Say "Start it   wscript `"$vbs`""
+} else {
+    Say 'Open with  the SynergyScan icon on the desktop'
+    Say '           or http://localhost:8000 in a browser'
+}
 Write-Host ''
 
 if (-not $NoStart) {
