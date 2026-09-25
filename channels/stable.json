@@ -1,6 +1,6 @@
 {
-  "version": "2026.09.25-2",
-  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.09.25-2/synergyscan-2026.09.25-2.zip",
-  "sha256": "d5e5966f74ab8ec932247bdcd3a303334daebfaa21bfb3e473db315991dca1d8",
-  "notes": "First release"
+  "version": "2026.09.25-3",
+  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.09.25-3/synergyscan-2026.09.25-3.zip",
+  "sha256": "cc28c269e73d7f577da3b21b3413df1d63076ebc1baff38c9e165b1a2c2cf130",
+  "notes": "Installer fix for fresh machines"
 }
