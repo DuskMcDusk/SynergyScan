@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SynergyScan</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header>
+  <h1>SynergyScan</h1>
+  <div class="meta">
+    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
+    <span id="version" class="pill muted"></span>
+  </div>
+</header>
+
+<!-- The scan field is the app's front door: always present, always focused.
+     A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
+<section id="scanbar">
+  <label for="scan" class="sr-only">Scan or type a code</label>
+  <input id="scan" type="text" autocomplete="off" autocapitalize="off"
+         spellcheck="false" placeholder="Scan a barcode, or type a SKU and press Enter">
+  <button id="scan-go" class="primary">Find</button>
+</section>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <!-- Shown when a scan resolves to an item -->
+  <section id="item-panel" class="card" hidden>
+    <div class="row between">
+      <div>
+        <h2 id="item-name">—</h2>
+        <p class="muted"><span id="item-sku"></span> · <span id="item-unit"></span></p>
+      </div>
+      <div class="qty-block">
+        <div id="item-qty" class="qty">0</div>
+        <div class="muted">on hand</div>
+      </div>
+    </div>
+
+    <div class="row wrap gap">
+      <div class="field">
+        <label for="move-qty">Quantity</label>
+        <input id="move-qty" type="number" step="any" min="0" value="1">
+      </div>
+      <button class="ok" data-reason="receive">Receive in</button>
+      <button class="warn" data-reason="issue">Issue out</button>
+      <button data-reason="stocktake" id="btn-stocktake">Set count to…</button>
+    </div>
+
+    <details class="labels">
+      <summary>Print a label</summary>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="copies">Copies</label>
+          <input id="copies" type="number" min="1" max="50" value="1">
+        </div>
+        <div class="field">
+          <label for="symbology">Code type</label>
+          <select id="symbology">
+            <option value="code128">Code 128</option>
+            <option value="qr">QR code</option>
+            <option value="code39">Code 39</option>
+            <option value="ean13">EAN-13</option>
+          </select>
+        </div>
+        <button id="btn-preview">Preview</button>
+        <button id="btn-print" class="primary">Print</button>
+      </div>
+      <p class="muted small">The preview is rendered by the same code that
+        drives the printer, so it matches what comes out.</p>
+      <img id="preview" alt="Label preview" hidden>
+    </details>
+
+    <h3>Recent movements</h3>
+    <table id="item-movements" class="compact"><tbody></tbody></table>
+  </section>
+
+  <!-- Shown when a scan matches nothing -->
+  <section id="new-item-panel" class="card" hidden>
+    <h2>Not in the system yet</h2>
+    <p>Nothing matches <code id="unknown-code"></code>. Add it?</p>
+    <div class="row wrap gap">
+      <div class="field grow">
+        <label for="new-name">Name</label>
+        <input id="new-name" type="text" placeholder="e.g. Pasta di semola 500 g">
+      </div>
+      <div class="field">
+        <label for="new-sku">SKU</label>
+        <input id="new-sku" type="text">
+      </div>
+      <div class="field">
+        <label for="new-unit">Unit</label>
+        <input id="new-unit" type="text" value="pcs">
+      </div>
+      <div class="field">
+        <label for="new-min">Reorder at</label>
+        <input id="new-min" type="number" step="any" min="0" value="0">
+      </div>
+      <button id="btn-create" class="primary">Add item</button>
+      <button id="btn-cancel-create">Cancel</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row between wrap">
+      <h2>Stock</h2>
+      <div class="row gap">
+        <input id="search" type="search" placeholder="Search name, SKU or barcode">
+        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
+      </div>
+    </div>
+    <table id="items">
+      <thead><tr>
+        <th>Name</th><th>SKU</th><th class="num">On hand</th>
+        <th class="num">Reorder at</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
+  </section>
+</main>
+
+<footer>
+  <a href="/api/doctor" target="_blank">Diagnostics report</a> ·
+  <a href="/api/logs" target="_blank">Log</a> ·
+  <a href="/api/docs" target="_blank">API</a>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

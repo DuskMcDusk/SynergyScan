@@ -1,0 +1,6 @@
+{
+  "version": "0.0.0-0",
+  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v0.0.0-0/synergyscan-0.0.0-0.zip",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "notes": "Placeholder. Run tools/release.py to publish the first real release; it rewrites this file."
+}

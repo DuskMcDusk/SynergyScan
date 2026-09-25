@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+# Local runtime state — never committed. On a deployed machine this lives in
+# C:\SynergyScan\data\, outside the release directories entirely.
+data/
+*.db
+*.db-wal
+*.db-shm
+tools/out/
+preview.png
+Docs/
