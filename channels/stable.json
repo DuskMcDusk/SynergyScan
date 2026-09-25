@@ -1,6 +1,6 @@
 {
-  "version": "0.0.0-0",
-  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v0.0.0-0/synergyscan-0.0.0-0.zip",
-  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-  "notes": "Placeholder. Run tools/release.py to publish the first real release; it rewrites this file."
+  "version": "2026.09.25-2",
+  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.09.25-2/synergyscan-2026.09.25-2.zip",
+  "sha256": "d5e5966f74ab8ec932247bdcd3a303334daebfaa21bfb3e473db315991dca1d8",
+  "notes": "First release"
 }
