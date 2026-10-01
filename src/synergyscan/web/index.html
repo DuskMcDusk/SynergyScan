@@ -10,17 +10,30 @@
 </head>
 <body>
 
-<header>
+<div class="app">
+
+<aside class="sidebar">
   <h1 class="brand">
     <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 48" fill="none" stroke="#FFCD00" stroke-width="6" aria-hidden="true"><path d="M4 2V7M4 13V14A20 20 0 0 0 44 14V2"/><path d="M68 46V41M68 35V34A20 20 0 0 0 28 34V46"/></svg>
     <span class="brand-word" aria-label="Sinergy Flow"><span class="sinergy">SINERGY</span><span class="flow">FLOW</span></span>
     <span class="brand-product">Scan</span>
   </h1>
-  <div class="meta">
-    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
+  <nav class="mainnav" aria-label="Sections">
+    <a href="#scan" class="nav-link main" data-view="scan"><span>Scan</span></a>
+    <a href="#stock" class="nav-link main" data-view="stock"><span>Stock</span></a>
+    <!-- Area > Category tree: shown under Stock, only while Stock is open. -->
+    <div id="nav" aria-label="Areas and categories"></div>
+    <a href="#setup" class="nav-link main" data-view="setup"><span>Setup</span></a>
+  </nav>
+  <div class="side-foot">
     <span id="version" class="pill muted"></span>
+    <a href="/api/doctor" target="_blank">Diagnostics</a> ·
+    <a href="/api/logs" target="_blank">Log</a> ·
+    <a href="/api/docs" target="_blank">API</a>
   </div>
-</header>
+</aside>
+
+<div class="content">
 
 <!-- The scan field is the app's front door: always present, always focused.
      A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
@@ -29,11 +42,13 @@
   <input id="scan" type="text" autocomplete="off" autocapitalize="off"
          spellcheck="false" placeholder="Scan a barcode, or type a SKU and press Enter">
   <button id="scan-go" class="primary">Find</button>
+  <button id="btn-new-item" type="button">+ Add</button>
 </section>
 
 <div id="banner" class="banner" hidden></div>
 
 <main>
+<div id="view-scan" class="view">
   <!-- Shown when a scan resolves to an item -->
   <section id="item-panel" class="card" hidden>
     <div class="row between">
@@ -133,8 +148,8 @@
 
   <!-- Shown when a scan matches nothing -->
   <section id="new-item-panel" class="card" hidden>
-    <h2>Not in the system yet</h2>
-    <p>Nothing matches <code id="unknown-code"></code>. Add it?</p>
+    <h2 id="new-title">Not in the system yet</h2>
+    <p id="new-lead">Nothing matches <code id="unknown-code"></code>. Add it?</p>
     <div class="row wrap gap">
       <div class="field grow">
         <label for="new-name">Name</label>
@@ -146,7 +161,8 @@
       </div>
       <div class="field">
         <label for="new-unit">Unit</label>
-        <input id="new-unit" type="text" value="pcs">
+        <input id="new-unit" type="text" value="pcs" list="unit-options" autocomplete="off">
+        <datalist id="unit-options"></datalist>
       </div>
       <div class="field">
         <label for="new-min">Reorder at</label>
@@ -161,8 +177,58 @@
     </div>
   </section>
 
+  <section class="card" id="recent-card">
+    <h2>Recent activity</h2>
+    <table id="recent" class="compact"><tbody></tbody></table>
+  </section>
+</div>
+
+<div id="view-stock" class="view" hidden>
+  <section class="tiles" aria-label="Summary">
+  <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
+    <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
+    <span class="pill bad">act now</span>
+  </button>
+  <button class="tile" id="tile-low" type="button" title="Show items that are running low">
+    <span class="label">Low stock</span><span class="n" id="count-low">–</span>
+    <span class="pill warn">watch</span>
+  </button>
+  <div class="tile">
+    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
+    <span class="muted small" id="count-areas"></span>
+  </div>
+  <div class="tile">
+    <span class="label">Printer</span>
+    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
+  </div>
+</section>
+
+  <section class="card">
+    <div class="row between wrap">
+      <h2>Stock</h2>
+      <div class="row gap wrap">
+        <input id="search" type="search" placeholder="Search name, SKU or barcode">
+        <select id="filter-area"><option value="">All areas</option></select>
+        <select id="filter-category"><option value="">All categories</option></select>
+        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
+      </div>
+    </div>
+    <div class="table-scroll">
+    <table id="items">
+      <thead><tr>
+        <th>Name</th><th>SKU</th><th>Category</th><th>Location</th><th>Level</th>
+        <th class="num">On hand</th><th class="num">Reorder at</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
+  </section>
   <!-- Setup: the Area -> Category -> Item hierarchy and physical Locations
        are all user-managed here, not fixed in the code. -->
+</div>
+
+<div id="view-setup" class="view" hidden>
   <section class="card">
     <h2>Areas, categories &amp; locations</h2>
     <details class="labels" open>
@@ -211,33 +277,11 @@
       </div>
     </details>
   </section>
-
-  <section class="card">
-    <div class="row between wrap">
-      <h2>Stock</h2>
-      <div class="row gap">
-        <input id="search" type="search" placeholder="Search name, SKU or barcode">
-        <select id="filter-area"><option value="">All areas</option></select>
-        <select id="filter-category"><option value="">All categories</option></select>
-        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
-      </div>
-    </div>
-    <table id="items">
-      <thead><tr>
-        <th>Name</th><th>SKU</th><th>Category</th><th class="num">On hand</th>
-        <th class="num">Reorder at</th><th></th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
-  </section>
+</div>
 </main>
 
-<footer>
-  <a href="/api/doctor" target="_blank">Diagnostics report</a> ·
-  <a href="/api/logs" target="_blank">Log</a> ·
-  <a href="/api/docs" target="_blank">API</a>
-</footer>
+</div>
+</div>
 
 <script src="/app.js"></script>
 </body>

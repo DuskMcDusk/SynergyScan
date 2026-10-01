@@ -15,3 +15,5 @@ data/
 tools/out/
 preview.png
 Docs/
+# Throwaway UI experiments
+ui-testing/

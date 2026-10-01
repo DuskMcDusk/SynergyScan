@@ -60,6 +60,15 @@ const el = {
   filterArea: $("#filter-area"),
   filterCategory: $("#filter-category"),
 
+  nav: $("#nav"),
+  recent: $("#recent tbody"),
+  tileReorder: $("#tile-reorder"),
+  tileLow: $("#tile-low"),
+  countReorder: $("#count-reorder"),
+  countLow: $("#count-low"),
+  countItems: $("#count-items"),
+  countAreas: $("#count-areas"),
+
   areas: $("#areas tbody"),
   newAreaName: $("#new-area-name"),
   categories: $("#categories tbody"),
@@ -76,6 +85,8 @@ let bannerTimer = null;
 let areasCache = [];
 let categoriesCache = [];
 let locationsCache = [];
+let availFilter = "";  // "", "reorder" or "low": set by the summary tiles
+let allItems = [];   // unfiltered list: feeds the sidebar counts and the summary tiles
 
 /* ------------------------------------------------------------------ helpers */
 async function api(path, options = {}) {
@@ -130,6 +141,48 @@ function fillSelect(sel, list, placeholder, labelFn) {
   sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "";
 }
 
+/* -------------------------------------------------------------------- views
+ * Three screens, one at a time: Scan (the item in hand), Stock (the list) and
+ * Setup. The scan field stays on every screen; a successful scan or an Open
+ * click always lands on Scan, where the item is. The URL hash records the
+ * screen so reload and back/forward work. */
+const VIEWS = ["scan", "stock", "setup"];
+let view = "scan";
+
+function showView(name) {
+  if (!VIEWS.includes(name)) name = "scan";
+  view = name;
+  for (const v of VIEWS) $(`#view-${v}`).hidden = v !== name;
+  for (const a of document.querySelectorAll(".nav-link.main")) {
+    a.classList.toggle("on", a.dataset.view === name);
+  }
+  document.body.dataset.view = name;
+  if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
+  if (name === "scan") { loadRecent(); refocus(); }
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+
+async function loadRecent() {
+  let list = [];
+  try { list = await api("/api/movements?limit=8"); } catch { /* cosmetic */ }
+  el.recent.innerHTML = "";
+  if (!list.length) {
+    el.recent.innerHTML = '<tr><td class="muted">Nothing booked yet. Scan something to get started.</td></tr>';
+    return;
+  }
+  for (const m of list) {
+    const tr = document.createElement("tr");
+    const sign = m.delta > 0 ? "+" : "";
+    tr.innerHTML =
+      `<td class="muted">${m.created_at}</td>` +
+      `<td>${escapeHtml(m.name)} <span class="muted">${escapeHtml(m.sku)}</span></td>` +
+      `<td>${m.reason}</td><td class="num">${sign}${fmt(m.delta)}</td>`;
+    el.recent.appendChild(tr);
+  }
+}
+
 /* --------------------------------------------------------------------- scan */
 async function doScan() {
   const code = el.scan.value.trim();
@@ -154,16 +207,28 @@ let scannedCode = "";
 let suggestedSku = "";
 
 function showUnknown(code) {
+  showView("scan");
   currentItem = null;
   scannedCode = code;
   suggestedSku = "";
   el.panel.hidden = true;
   el.newPanel.hidden = false;
+  $("#new-title").textContent = "Not in the system yet";
+  $("#new-lead").hidden = false;
   el.unknownCode.textContent = code;
   el.newSku.value = "";
   el.newName.value = "";
   el.newCategory.value = "";
   el.newName.focus();
+}
+
+/* The "Add" button: the same form, opened by hand with no scanned code. The
+   SKU is suggested straight away since there is no scan to fall back on. */
+function showNewItem() {
+  showUnknown("");
+  $("#new-title").textContent = "New item";
+  $("#new-lead").hidden = true;
+  prefillSku();
 }
 
 /* Picking a category fills the SKU with the one the server would generate, so
@@ -183,6 +248,7 @@ async function prefillSku() {
 /* `item` is the full record from GET /api/items/{id}: qty, availability,
    movements and lots all in one call. */
 function showItem(item) {
+  showView("scan");
   currentItem = item;
   el.newPanel.hidden = true;
   el.panel.hidden = false;
@@ -294,6 +360,7 @@ async function move(reason) {
     }
     await refreshItem();
     await loadItems();
+    loadRecent();
   } catch (e) {
     say(e.message, "error");
   }
@@ -358,6 +425,10 @@ async function loadItems() {
     say(e.message, "error");
     return;
   }
+  refreshStats();
+  if (availFilter) list = list.filter((it) => it.availability === availFilter);
+  el.tileReorder.classList.toggle("on", availFilter === "reorder");
+  el.tileLow.classList.toggle("on", availFilter === "low");
   el.items.innerHTML = "";
   el.itemsEmpty.hidden = list.length > 0;
   for (const it of list) {
@@ -366,14 +437,90 @@ async function loadItems() {
       tr.className = it.availability;
     }
     const cat = categoriesCache.find((c) => c.id === it.category_id);
+    const loc = locationsCache.find((l) => l.id === it.location_id);
     tr.innerHTML =
       `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.sku)}</td>` +
       `<td class="muted">${cat ? escapeHtml(cat.name) : ""}</td>` +
+      `<td class="muted">${loc ? escapeHtml(loc.code) : ""}</td>` +
+      `<td>${levelMeter(it)}</td>` +
       `<td class="num">${fmt(it.qty)} ${escapeHtml(it.unit)}</td>` +
       `<td class="num muted">${fmt(it.min_qty)}</td>` +
       `<td><button data-open="${it.item_id}">Open</button></td>`;
     el.items.appendChild(tr);
   }
+}
+
+/* A bar for how far above the reorder point an item is: full at twice the
+   reorder level or more. Items with no reorder level set show as full. */
+function levelMeter(it) {
+  const pct = it.min_qty > 0
+    ? Math.max(3, Math.min(100, (it.qty / (it.min_qty * 2)) * 100))
+    : 100;
+  const cls = it.availability === "reorder" ? "zero" : it.availability === "low" ? "lo" : "";
+  return `<span class="meter" aria-hidden="true"><i class="${cls}" style="width:${pct}%"></i></span>`;
+}
+
+/* ------------------------------------------------- sidebar tree & summary tiles */
+async function refreshStats() {
+  try {
+    allItems = await api("/api/items");
+  } catch { return; }   // the tiles are a convenience; the list reports its own errors
+  el.countItems.textContent = allItems.length;
+  el.countReorder.textContent = allItems.filter((i) => i.availability === "reorder").length;
+  el.countLow.textContent = allItems.filter((i) => i.availability === "low").length;
+  el.countAreas.textContent =
+    `${areasCache.length} area${areasCache.length === 1 ? "" : "s"}`;
+  renderNav();
+  renderUnitOptions();
+}
+
+/* Suggestions for the Unit field: every unit already in use, most common
+   first, so "pcs" and "pieces" do not drift apart. Case-insensitive. */
+function renderUnitOptions() {
+  const seen = new Map();
+  for (const it of allItems) {
+    const u = (it.unit || "").trim();
+    if (!u) continue;
+    const key = u.toLowerCase();
+    const entry = seen.get(key) || { unit: u, n: 0 };
+    entry.n += 1;
+    seen.set(key, entry);
+  }
+  const units = [...seen.values()].sort((a, b) => b.n - a.n).map((e) => e.unit);
+  $("#unit-options").innerHTML = units
+    .map((u) => `<option value="${escapeHtml(u).replace(/"/g, "&quot;")}"></option>`)
+    .join("");
+}
+
+/* Area > Category tree. Each link just sets the two filter selects, so the
+   selects remain the single source of truth for what the list shows. */
+function renderNav() {
+  const catArea = new Map(categoriesCache.map((c) => [c.id, c.area_id]));
+  const perCat = new Map();
+  const perArea = new Map();
+  for (const it of allItems) {
+    if (it.category_id == null) continue;
+    perCat.set(it.category_id, (perCat.get(it.category_id) || 0) + 1);
+    const a = catArea.get(it.category_id);
+    perArea.set(a, (perArea.get(a) || 0) + 1);
+  }
+  const area = el.filterArea.value;
+  const cat = el.filterCategory.value;
+  const link = (cls, label, count, attrs, on) =>
+    `<a href="#" class="nav-link ${cls}${on ? " on" : ""}" ${attrs}>` +
+    `<span>${escapeHtml(label)}</span><span class="count">${count}</span></a>`;
+  let html = link("", "All stock", allItems.length, 'data-area="" data-category=""',
+                  !area && !cat);
+  for (const a of areasCache) {
+    const areaOn = String(a.id) === area && !cat;
+    html += link("", a.name, perArea.get(a.id) || 0,
+                 `data-area="${a.id}" data-category=""`, areaOn);
+    for (const c of categoriesCache.filter((x) => x.area_id === a.id)) {
+      html += link("sub", c.name, perCat.get(c.id) || 0,
+                   `data-area="${a.id}" data-category="${c.id}"`, String(c.id) === cat);
+    }
+  }
+  el.nav.innerHTML = html;
 }
 
 async function createItem() {
@@ -426,6 +573,7 @@ async function loadAreas() {
   }
   fillSelect(el.newCategoryArea, areasCache, "(choose an area)");
   fillSelect(el.filterArea, areasCache, "All areas");
+  renderNav();
 }
 
 function areaName(areaId) {
@@ -455,6 +603,7 @@ async function loadCategories() {
   fillSelect(el.newCategory, categoriesCache, "—", label);
   fillSelect(el.editCategory, categoriesCache, "—", label);
   fillSelect(el.filterCategory, categoriesCache, "All categories", label);
+  renderNav();
 }
 
 async function loadLocations() {
@@ -648,6 +797,21 @@ el.scan.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); doScan(); }
 });
 el.scanGo.addEventListener("click", doScan);
+$("#btn-new-item").addEventListener("click", showNewItem);
+
+/* A datalist only offers options matching what is already typed, so the
+   prefilled "pcs" would hide every other unit. Clear it while the field has
+   focus (showing it as the placeholder) and put it back if left empty. */
+let unitDefault = "";
+el.newUnit.addEventListener("focus", () => {
+  if (!el.newUnit.value) return;
+  unitDefault = el.newUnit.value;
+  el.newUnit.placeholder = unitDefault;
+  el.newUnit.value = "";
+});
+el.newUnit.addEventListener("blur", () => {
+  if (!el.newUnit.value.trim()) el.newUnit.value = unitDefault || "pcs";
+});
 
 for (const btn of document.querySelectorAll("[data-reason]")) {
   btn.addEventListener("click", () => move(btn.dataset.reason));
@@ -719,6 +883,24 @@ el.locations.addEventListener("click", async (e) => {
   } catch (err) { say(err.message, "error"); }
 });
 
+el.nav.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-area]");
+  if (!a) return;
+  e.preventDefault();
+  el.filterArea.value = a.dataset.area;
+  el.filterCategory.value = a.dataset.category;
+  showView("stock");
+  loadItems();
+});
+
+/* The tiles toggle a filter on availability; clicking the active one clears it. */
+for (const [tile, which] of [[el.tileReorder, "reorder"], [el.tileLow, "low"]]) {
+  tile.addEventListener("click", () => {
+    availFilter = availFilter === which ? "" : which;
+    loadItems();
+  });
+}
+
 let searchTimer = null;
 for (const node of [el.search, el.lowOnly, el.filterArea, el.filterCategory]) {
   node.addEventListener("input", () => {
@@ -745,6 +927,7 @@ document.addEventListener("keydown", (e) => {
   await loadCategories();
   await loadLocations();
   await loadItems();
+  showView(location.hash.slice(1));
 })();
 loadVersion();
 refreshPrinter();
