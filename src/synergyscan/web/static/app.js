@@ -471,6 +471,25 @@ async function refreshStats() {
   el.countAreas.textContent =
     `${areasCache.length} area${areasCache.length === 1 ? "" : "s"}`;
   renderNav();
+  renderUnitOptions();
+}
+
+/* Suggestions for the Unit field: every unit already in use, most common
+   first, so "pcs" and "pieces" do not drift apart. Case-insensitive. */
+function renderUnitOptions() {
+  const seen = new Map();
+  for (const it of allItems) {
+    const u = (it.unit || "").trim();
+    if (!u) continue;
+    const key = u.toLowerCase();
+    const entry = seen.get(key) || { unit: u, n: 0 };
+    entry.n += 1;
+    seen.set(key, entry);
+  }
+  const units = [...seen.values()].sort((a, b) => b.n - a.n).map((e) => e.unit);
+  $("#unit-options").innerHTML = units
+    .map((u) => `<option value="${escapeHtml(u).replace(/"/g, "&quot;")}"></option>`)
+    .join("");
 }
 
 /* Area > Category tree. Each link just sets the two filter selects, so the
@@ -779,6 +798,20 @@ el.scan.addEventListener("keydown", (e) => {
 });
 el.scanGo.addEventListener("click", doScan);
 $("#btn-new-item").addEventListener("click", showNewItem);
+
+/* A datalist only offers options matching what is already typed, so the
+   prefilled "pcs" would hide every other unit. Clear it while the field has
+   focus (showing it as the placeholder) and put it back if left empty. */
+let unitDefault = "";
+el.newUnit.addEventListener("focus", () => {
+  if (!el.newUnit.value) return;
+  unitDefault = el.newUnit.value;
+  el.newUnit.placeholder = unitDefault;
+  el.newUnit.value = "";
+});
+el.newUnit.addEventListener("blur", () => {
+  if (!el.newUnit.value.trim()) el.newUnit.value = unitDefault || "pcs";
+});
 
 for (const btn of document.querySelectorAll("[data-reason]")) {
   btn.addEventListener("click", () => move(btn.dataset.reason));
