@@ -27,6 +27,7 @@
   </nav>
   <div class="side-foot">
     <span id="version" class="pill muted"></span>
+    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
     <div class="foot-actions">
       <button id="btn-check-update" type="button" class="side-btn">Check for updates</button>
       <button id="btn-restart" type="button" class="side-btn">Restart</button>
@@ -41,16 +42,6 @@
 
 <div class="content">
 
-<!-- Shown only when the update channel offers a newer release. -->
-<div id="update-bar" class="update-bar" hidden>
-  <div><strong>A new version is available</strong>
-    <span id="update-version"></span>
-    <span id="update-notes" class="muted"></span></div>
-  <div class="row gap">
-    <button id="btn-update-now" type="button" class="primary">Update now</button>
-    <button id="btn-update-later" type="button">Later</button>
-  </div>
-</div>
 
 <!-- The scan field is the app's front door: always present, always focused.
      A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
@@ -61,8 +52,6 @@
   <button id="scan-go" class="primary">Find</button>
   <button id="btn-new-item" type="button">+ Add</button>
 </section>
-
-<div id="banner" class="banner" hidden></div>
 
 <main>
 <div id="view-scan" class="view">
@@ -204,20 +193,10 @@
   <section class="tiles" aria-label="Summary">
   <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
     <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
-    <span class="pill bad">act now</span>
   </button>
   <button class="tile" id="tile-low" type="button" title="Show items that are running low">
     <span class="label">Low stock</span><span class="n" id="count-low">–</span>
-    <span class="pill warn">watch</span>
   </button>
-  <div class="tile">
-    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
-    <span class="muted small" id="count-areas"></span>
-  </div>
-  <div class="tile">
-    <span class="label">Printer</span>
-    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
-  </div>
 </section>
 
   <section class="card">
@@ -298,6 +277,21 @@
 </main>
 
 </div>
+</div>
+
+<!-- Notifications float bottom-right over the page and never move the layout. -->
+<div id="toasts" class="toasts" aria-live="polite">
+  <!-- Shown only when the update channel offers a newer release. -->
+  <div id="update-bar" class="update-bar" hidden>
+    <button id="btn-update-close" type="button" class="toast-close" aria-label="Dismiss">×</button>
+    <div><strong>A new version is available</strong>
+      <span id="update-version"></span>
+      <span id="update-notes" class="muted"></span></div>
+    <div class="row gap">
+      <button id="btn-update-now" type="button" class="primary">Update now</button>
+      <button id="btn-update-later" type="button">Later</button>
+    </div>
+  </div>
 </div>
 
 <!-- Blocks the screen while the app restarts or updates, and doubles as the
