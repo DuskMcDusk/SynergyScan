@@ -42,15 +42,21 @@ def test_frame_appends_p2_big_endian():
 
 # ---------------------------------------------------------------------- pack
 def test_pack_sets_the_expected_bit_for_a_single_dot():
-    """LSB-first within each byte, and the image is centred on the head."""
+    """LSB-first within each byte, and the image is centred on the head.
+
+    The head burns right-to-left relative to image space (see pack()'s
+    docstring), so a column's local, centred offset is mirrored around
+    HEAD_DOTS-1 before it is packed.
+    """
     img = Image.new("1", (8, 1), 1)      # 1 = white
     img.putpixel((0, 0), 0)             # black at x=0
     data, cols = P.pack(img)
 
     assert cols == 1
     assert len(data) == P.BPL
-    # An 8-dot-wide image is centred: x_off = (384 - 8) // 2 = 188.
-    dot = 188
+    # An 8-dot-wide image is centred: local offset = (384 - 8) // 2 = 188,
+    # mirrored to head dot 383 - 188 = 195.
+    dot = 195
     assert data[dot // 8] == 1 << (dot % 8)
     assert sum(data) == 1 << (dot % 8)
 
@@ -59,10 +65,12 @@ def test_pack_crops_a_wide_label_symmetrically():
     """A 50 mm roll is 400 dots; the head is 384, so 8 come off each side."""
     img = Image.new("1", (400, 1), 1)
     img.putpixel((0, 0), 0)             # inside the cropped-away left margin
-    img.putpixel((8, 0), 0)             # first dot that survives
+    img.putpixel((8, 0), 0)             # first (leftmost) dot that survives
     data, _ = P.pack(img)
-    assert data[0] == 0x01              # the x=8 dot lands on head dot 0
-    assert sum(data) == 1               # the x=0 dot was dropped
+    # Mirrored: the leftmost surviving column lands at the highest head dot,
+    # not the lowest - see pack()'s docstring.
+    assert data[P.BPL - 1] == 0x80
+    assert sum(data) == 0x80
 
 
 def test_pack_length_tracks_height():

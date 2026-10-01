@@ -82,6 +82,115 @@ def test_low_stock_filter(client):
     assert [x["sku"] for x in rows] == ["LOW"]
 
 
+def test_item_response_includes_the_new_master_fields_and_availability(client):
+    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
+    category = client.post("/api/categories",
+                           json={"area_id": area["id"], "name": "Electrodes"}).json()
+    item = client.post("/api/items", json={
+        "sku": "FOAM-001", "name": "Fe foam", "category_id": category["id"],
+        "specification": "60 ppi", "supplier": "Supplier A", "lead_time_days": 30,
+        "min_qty": 5, "low_qty": 8,
+    }).json()
+    assert item["category_id"] == category["id"]
+    assert item["specification"] == "60 ppi"
+
+    full = client.get(f"/api/items/{item['id']}").json()
+    assert full["availability"] == "reorder"       # qty 0, min_qty 5
+    assert "lots" in full
+
+
+def test_creating_an_item_with_an_unknown_category_is_a_404(client):
+    r = client.post("/api/items", json={"sku": "A-1", "name": "Widget",
+                                        "category_id": 999})
+    assert r.status_code == 404
+
+
+def test_low_and_reorder_tiers_appear_in_the_items_list(client):
+    item = client.post("/api/items", json={"sku": "A-1", "name": "Widget",
+                                           "min_qty": 10, "low_qty": 15}).json()
+    client.post("/api/movements", json={"item_id": item["id"], "delta": 5,
+                                        "reason": "receive"})
+    assert client.get("/api/items").json()[0]["availability"] == "reorder"
+
+    client.post("/api/movements", json={"item_id": item["id"], "delta": 7,
+                                        "reason": "receive"})      # qty 12
+    assert client.get("/api/items").json()[0]["availability"] == "low"
+
+    client.post("/api/movements", json={"item_id": item["id"], "delta": 10,
+                                        "reason": "receive"})      # qty 22
+    assert client.get("/api/items").json()[0]["availability"] == "sufficient"
+
+
+def test_items_can_be_filtered_by_category(client):
+    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
+    category = client.post("/api/categories",
+                           json={"area_id": area["id"], "name": "Electrodes"}).json()
+    client.post("/api/items", json={"sku": "A-1", "name": "In category",
+                                    "category_id": category["id"]})
+    client.post("/api/items", json={"sku": "B-1", "name": "Uncategorised"})
+    rows = client.get(f"/api/items?category_id={category['id']}").json()
+    assert [x["sku"] for x in rows] == ["A-1"]
+
+
+# -------------------------------------------------------------------- areas
+def test_create_and_list_areas(client):
+    r = client.post("/api/areas", json={"name": "Battery Testing"})
+    assert r.status_code == 201
+    assert [a["name"] for a in client.get("/api/areas").json()] == ["Battery Testing"]
+
+
+def test_duplicate_area_name_is_a_conflict(client):
+    client.post("/api/areas", json={"name": "Chemistry"})
+    r = client.post("/api/areas", json={"name": "Chemistry"})
+    assert r.status_code == 409
+
+
+def test_patching_a_missing_area_is_a_404(client):
+    assert client.patch("/api/areas/999", json={"name": "x"}).status_code == 404
+
+
+# ---------------------------------------------------------------- categories
+def test_create_and_list_categories(client):
+    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
+    r = client.post("/api/categories", json={"area_id": area["id"], "name": "Electrodes"})
+    assert r.status_code == 201
+    assert [c["name"] for c in client.get("/api/categories").json()] == ["Electrodes"]
+
+
+def test_creating_a_category_needs_a_real_area(client):
+    r = client.post("/api/categories", json={"area_id": 999, "name": "Electrodes"})
+    assert r.status_code == 404
+
+
+def test_list_categories_filtered_by_area(client):
+    a = client.post("/api/areas", json={"name": "Battery Testing"}).json()
+    b = client.post("/api/areas", json={"name": "Chemistry"}).json()
+    client.post("/api/categories", json={"area_id": a["id"], "name": "Electrodes"})
+    client.post("/api/categories", json={"area_id": b["id"], "name": "Solvents"})
+    rows = client.get(f"/api/categories?area_id={a['id']}").json()
+    assert [c["name"] for c in rows] == ["Electrodes"]
+
+
+# ----------------------------------------------------------------- locations
+def test_create_and_list_locations(client):
+    r = client.post("/api/locations", json={"code": "D1", "name": "Shelf D1"})
+    assert r.status_code == 201
+    assert [l["code"] for l in client.get("/api/locations").json()] == ["D1"]
+
+
+def test_patch_updates_a_location(client):
+    loc = client.post("/api/locations", json={"code": "D1", "name": "Shelf D1"}).json()
+    r = client.patch(f"/api/locations/{loc['id']}", json={"name": "Shelf D1 (top)"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Shelf D1 (top)"
+
+
+def test_duplicate_location_code_is_a_conflict(client):
+    client.post("/api/locations", json={"code": "D1", "name": "Shelf D1"})
+    r = client.post("/api/locations", json={"code": "D1", "name": "Somewhere else"})
+    assert r.status_code == 409
+
+
 # ---------------------------------------------------------------------- scan
 def test_scan_finds_an_item(client):
     client.post("/api/items", json={"sku": "SKU-0042", "name": "Pasta"})
@@ -147,6 +256,41 @@ def test_a_matching_stocktake_records_nothing(client):
                                         "reason": "receive"})
     r = client.post("/api/stocktake", json={"item_id": item["id"], "counted": 5})
     assert r.json()["changed"] is False
+
+
+# ---------------------------------------------------------------------- lots
+def test_create_and_list_lots_for_an_item(client):
+    item = client.post("/api/items", json={"sku": "A-1", "name": "W"}).json()
+    r = client.post("/api/lots", json={"item_id": item["id"], "code": "Supplier Lot 4582"})
+    assert r.status_code == 201
+    rows = client.get(f"/api/lots?item_id={item['id']}").json()
+    assert [l["code"] for l in rows] == ["Supplier Lot 4582"]
+
+
+def test_creating_a_lot_for_a_missing_item_is_a_404(client):
+    r = client.post("/api/lots", json={"item_id": 999, "code": "L1"})
+    assert r.status_code == 404
+
+
+def test_listing_lots_for_a_missing_item_is_a_404(client):
+    assert client.get("/api/lots?item_id=999").status_code == 404
+
+
+def test_a_movement_can_reference_a_lot(client):
+    item = client.post("/api/items", json={"sku": "A-1", "name": "W"}).json()
+    lot = client.post("/api/lots", json={"item_id": item["id"], "code": "L1"}).json()
+    r = client.post("/api/movements", json={"item_id": item["id"], "delta": 12,
+                                            "reason": "receive", "lot_id": lot["id"]})
+    assert r.status_code == 201
+    lots = client.get(f"/api/lots?item_id={item['id']}").json()
+    assert lots[0]["qty"] == 12
+
+
+def test_a_movement_against_an_unknown_lot_is_a_404(client):
+    item = client.post("/api/items", json={"sku": "A-1", "name": "W"}).json()
+    r = client.post("/api/movements", json={"item_id": item["id"], "delta": 1,
+                                            "reason": "receive", "lot_id": 999})
+    assert r.status_code == 404
 
 
 # -------------------------------------------------------------------- labels

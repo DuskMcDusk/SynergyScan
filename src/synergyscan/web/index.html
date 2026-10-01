@@ -42,7 +42,10 @@
         <p class="muted"><span id="item-sku"></span> · <span id="item-unit"></span></p>
       </div>
       <div class="qty-block">
-        <div id="item-qty" class="qty">0</div>
+        <div class="row gap" style="justify-content:flex-end">
+          <div id="item-qty" class="qty">0</div>
+          <span id="item-availability" class="pill"></span>
+        </div>
         <div class="muted">on hand</div>
       </div>
     </div>
@@ -52,10 +55,57 @@
         <label for="move-qty">Quantity</label>
         <input id="move-qty" type="number" step="any" min="0" value="1">
       </div>
+      <div class="field">
+        <label for="move-lot">Lot</label>
+        <select id="move-lot"><option value="">(no lot)</option></select>
+      </div>
       <button class="ok" data-reason="receive">Receive in</button>
       <button class="warn" data-reason="issue">Issue out</button>
       <button data-reason="stocktake" id="btn-stocktake">Set count to…</button>
     </div>
+
+    <details class="labels">
+      <summary>Item details</summary>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="edit-category">Category</label>
+          <select id="edit-category"><option value="">—</option></select>
+        </div>
+        <div class="field">
+          <label for="edit-location">Location</label>
+          <select id="edit-location"><option value="">—</option></select>
+        </div>
+        <div class="field grow">
+          <label for="edit-specification">Specification</label>
+          <input id="edit-specification" type="text">
+        </div>
+        <div class="field">
+          <label for="edit-supplier">Supplier</label>
+          <input id="edit-supplier" type="text">
+        </div>
+        <div class="field">
+          <label for="edit-lead-time">Lead time (days)</label>
+          <input id="edit-lead-time" type="number" min="0">
+        </div>
+        <div class="field">
+          <label for="edit-low-qty">Low at</label>
+          <input id="edit-low-qty" type="number" step="any" min="0">
+        </div>
+        <button id="btn-save-details" class="primary">Save details</button>
+      </div>
+    </details>
+
+    <details class="labels">
+      <summary>Lots</summary>
+      <table id="item-lots" class="compact"><tbody></tbody></table>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="new-lot-code">Lot code</label>
+          <input id="new-lot-code" type="text" placeholder="e.g. Supplier Lot 4582">
+        </div>
+        <button id="btn-add-lot">Add lot</button>
+      </div>
+    </details>
 
     <details class="labels">
       <summary>Print a label</summary>
@@ -106,9 +156,60 @@
         <label for="new-min">Reorder at</label>
         <input id="new-min" type="number" step="any" min="0" value="0">
       </div>
+      <div class="field">
+        <label for="new-category">Category</label>
+        <select id="new-category"><option value="">—</option></select>
+      </div>
       <button id="btn-create" class="primary">Add item</button>
       <button id="btn-cancel-create">Cancel</button>
     </div>
+  </section>
+
+  <!-- Setup: the Area -> Category -> Item hierarchy and physical Locations
+       are all user-managed here, not fixed in the code. -->
+  <section class="card">
+    <h2>Areas, categories &amp; locations</h2>
+    <details class="labels" open>
+      <summary>Areas</summary>
+      <table id="areas" class="compact"><tbody></tbody></table>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="new-area-name">New area</label>
+          <input id="new-area-name" type="text" placeholder="e.g. Battery Testing">
+        </div>
+        <button id="btn-add-area">Add area</button>
+      </div>
+    </details>
+    <details class="labels">
+      <summary>Categories</summary>
+      <table id="categories" class="compact"><tbody></tbody></table>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="new-category-area">Area</label>
+          <select id="new-category-area"><option value="">—</option></select>
+        </div>
+        <div class="field">
+          <label for="new-category-name">New category</label>
+          <input id="new-category-name" type="text" placeholder="e.g. Electrodes">
+        </div>
+        <button id="btn-add-category">Add category</button>
+      </div>
+    </details>
+    <details class="labels">
+      <summary>Locations</summary>
+      <table id="locations" class="compact"><tbody></tbody></table>
+      <div class="row wrap gap">
+        <div class="field">
+          <label for="new-location-code">Code</label>
+          <input id="new-location-code" type="text" placeholder="e.g. D1">
+        </div>
+        <div class="field grow">
+          <label for="new-location-name">Name</label>
+          <input id="new-location-name" type="text" placeholder="e.g. Shelf D1">
+        </div>
+        <button id="btn-add-location">Add location</button>
+      </div>
+    </details>
   </section>
 
   <section class="card">
@@ -116,12 +217,14 @@
       <h2>Stock</h2>
       <div class="row gap">
         <input id="search" type="search" placeholder="Search name, SKU or barcode">
+        <select id="filter-area"><option value="">All areas</option></select>
+        <select id="filter-category"><option value="">All categories</option></select>
         <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
       </div>
     </div>
     <table id="items">
       <thead><tr>
-        <th>Name</th><th>SKU</th><th class="num">On hand</th>
+        <th>Name</th><th>SKU</th><th>Category</th><th class="num">On hand</th>
         <th class="num">Reorder at</th><th></th>
       </tr></thead>
       <tbody></tbody>

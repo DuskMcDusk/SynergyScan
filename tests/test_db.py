@@ -103,6 +103,120 @@ def test_archived_items_are_not_found_by_scanning(con, item):
     assert db.find_by_code(con, "SKU-0042") is None
 
 
+def test_create_item_accepts_the_new_master_fields(con):
+    area = db.create_area(con, "Battery Testing")
+    category = db.create_category(con, area, "Electrodes")
+    location = db.create_location(con, "D1", "Shelf D1")
+    item_id = db.create_item(
+        con, sku="FOAM-001", name="Fe foam", category_id=category,
+        location_id=location, specification="60 ppi, 3 mm", supplier="Supplier A",
+        lead_time_days=30, min_qty=5, low_qty=8,
+    )
+    row = db.get_item(con, item_id)
+    assert row["category_id"] == category
+    assert row["location_id"] == location
+    assert row["specification"] == "60 ppi, 3 mm"
+    assert row["supplier"] == "Supplier A"
+    assert row["lead_time_days"] == 30
+    assert row["low_qty"] == 8
+
+
+def test_create_item_leaves_new_fields_null_by_default(con, item):
+    row = db.get_item(con, item)
+    assert row["category_id"] is None
+    assert row["location_id"] is None
+    assert row["specification"] is None
+    assert row["supplier"] is None
+    assert row["lead_time_days"] is None
+    assert row["low_qty"] is None
+
+
+def test_update_item_can_set_the_new_fields(con, item):
+    category = db.create_category(con, db.create_area(con, "Chemistry"), "Solvents")
+    db.update_item(con, item, category_id=category, supplier="New Supplier",
+                   low_qty=20)
+    row = db.get_item(con, item)
+    assert row["category_id"] == category
+    assert row["supplier"] == "New Supplier"
+    assert row["low_qty"] == 20
+
+
+def test_low_qty_below_min_qty_is_refused_on_create(con):
+    with pytest.raises(ValueError, match="low_qty"):
+        db.create_item(con, sku="A-1", name="Widget", min_qty=10, low_qty=5)
+
+
+def test_low_qty_below_min_qty_is_refused_on_update(con, item):
+    # item's min_qty is 10 (see the `item` fixture)
+    with pytest.raises(ValueError, match="low_qty"):
+        db.update_item(con, item, low_qty=1)
+
+
+# ------------------------------------------------------------------- areas
+def test_create_and_list_areas(con):
+    db.create_area(con, "Battery Testing")
+    db.create_area(con, "Chemistry")
+    assert [a["name"] for a in db.list_areas(con)] == ["Battery Testing", "Chemistry"]
+
+
+def test_area_name_is_unique_ignoring_case(con):
+    db.create_area(con, "Chemistry")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_area(con, "chemistry")
+
+
+def test_archiving_an_area_hides_it_but_does_not_delete_it(con):
+    area = db.create_area(con, "Chemistry")
+    db.update_area(con, area, archived=True)
+    assert db.list_areas(con) == []
+    assert db.get_area(con, area) is not None
+
+
+# -------------------------------------------------------------- categories
+def test_create_and_list_categories_for_an_area(con):
+    area = db.create_area(con, "Battery Testing")
+    db.create_category(con, area, "Electrodes")
+    db.create_category(con, area, "Membranes")
+    other = db.create_area(con, "Chemistry")
+    db.create_category(con, other, "Solvents")
+    assert [c["name"] for c in db.list_categories(con, area_id=area)] == \
+        ["Electrodes", "Membranes"]
+    assert len(db.list_categories(con)) == 3
+
+
+def test_category_requires_a_real_area(con):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_category(con, 9999, "Electrodes")
+
+
+def test_category_name_is_unique_within_an_area_but_not_across_areas(con):
+    a = db.create_area(con, "Battery Testing")
+    b = db.create_area(con, "Chemistry")
+    db.create_category(con, a, "Solvents")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_category(con, a, "solvents")
+    db.create_category(con, b, "Solvents")            # different area: fine
+
+
+# --------------------------------------------------------------- locations
+def test_create_and_list_locations(con):
+    db.create_location(con, "D1", "Shelf D1")
+    db.create_location(con, "C4", "Drawer C4")
+    assert [l["code"] for l in db.list_locations(con)] == ["C4", "D1"]
+
+
+def test_location_code_is_unique(con):
+    db.create_location(con, "D1", "Shelf D1")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_location(con, "d1", "Somewhere else")
+
+
+def test_update_location_fields(con):
+    loc = db.create_location(con, "D1", "Shelf D1")
+    db.update_location(con, loc, name="Shelf D1 (top)")
+    assert db.get_location(con, loc)["name"] == "Shelf D1 (top)"
+
+
 # ----------------------------------------------------------------- movements
 def test_stock_starts_at_zero(con, item):
     assert db.on_hand(con, item) == 0
@@ -145,6 +259,55 @@ def test_history_is_preserved_in_order(con, item):
     assert [r["note"] for r in rows] == ["second", "first"]
 
 
+def test_a_movement_without_a_lot_id_still_works(con, item):
+    db.add_movement(con, item, 5, "receive")
+    assert db.on_hand(con, item) == 5
+
+
+# --------------------------------------------------------------------- lots
+def test_create_and_list_lots_for_an_item(con, item):
+    db.create_lot(con, item, "Supplier Lot 4582")
+    db.create_lot(con, item, "Supplier Lot 9001")
+    assert [l["code"] for l in db.list_lots(con, item)] == \
+        ["Supplier Lot 4582", "Supplier Lot 9001"]
+
+
+def test_lot_requires_a_real_item(con):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_lot(con, 9999, "Some lot")
+
+
+def test_lot_code_is_unique_per_item_but_not_across_items(con, item):
+    other = db.create_item(con, sku="B-2", name="Other")
+    db.create_lot(con, item, "L1")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_lot(con, item, "l1")
+    db.create_lot(con, other, "L1")                   # different item: fine
+
+
+def test_lot_on_hand_is_the_sum_of_its_movements(con, item):
+    lot = db.create_lot(con, item, "Supplier Lot 4582")
+    db.add_movement(con, item, 12, "receive", lot_id=lot)
+    db.add_movement(con, item, -3, "issue", lot_id=lot)
+    db.add_movement(con, item, 100, "receive")         # unrelated to the lot
+    assert db.lot_on_hand(con, lot) == 9
+    assert db.on_hand(con, item) == 109
+
+
+def test_list_lots_carries_each_lots_derived_qty(con, item):
+    lot = db.create_lot(con, item, "Supplier Lot 4582")
+    db.add_movement(con, item, 12, "receive", lot_id=lot)
+    rows = db.list_lots(con, item)
+    assert rows[0]["qty"] == 12
+
+
+def test_archiving_a_lot_hides_it_but_does_not_delete_it(con, item):
+    lot = db.create_lot(con, item, "L1")
+    db.update_lot(con, lot, archived=True)
+    assert db.list_lots(con, item) == []
+    assert db.get_lot(con, lot) is not None
+
+
 # ----------------------------------------------------------------- stocktake
 def test_stocktake_appends_the_difference_rather_than_overwriting(con, item):
     db.add_movement(con, item, 100, "receive")
@@ -178,6 +341,22 @@ def test_stock_on_hand_view_lists_derived_quantities(con, item):
     assert rows[0]["sku"] == "SKU-0042"
 
 
+def test_list_items_exposes_the_new_item_master_columns(con):
+    area = db.create_area(con, "Battery Testing")
+    category = db.create_category(con, area, "Electrodes")
+    location = db.create_location(con, "D1", "Shelf D1")
+    db.create_item(con, sku="FOAM-001", name="Fe foam", category_id=category,
+                   location_id=location, low_qty=8, min_qty=5,
+                   specification="60 ppi", supplier="Supplier A", lead_time_days=30)
+    row = db.list_items(con)[0]
+    assert row["category_id"] == category
+    assert row["location_id"] == location
+    assert row["low_qty"] == 8
+    assert row["specification"] == "60 ppi"
+    assert row["supplier"] == "Supplier A"
+    assert row["lead_time_days"] == 30
+
+
 def test_low_stock_filter(con):
     a = db.create_item(con, sku="LOW", name="Low", min_qty=10)
     b = db.create_item(con, sku="FINE", name="Fine", min_qty=1)
@@ -185,6 +364,20 @@ def test_low_stock_filter(con):
     db.add_movement(con, b, 50, "receive")
     low = db.list_items(con, low_only=True)
     assert [r["sku"] for r in low] == ["LOW"]
+
+
+def test_list_items_can_be_filtered_by_category_and_area(con):
+    area = db.create_area(con, "Battery Testing")
+    category = db.create_category(con, area, "Electrodes")
+    other_area = db.create_area(con, "Chemistry")
+    other_category = db.create_category(con, other_area, "Solvents")
+    db.create_item(con, sku="A-1", name="In category", category_id=category)
+    db.create_item(con, sku="B-1", name="Elsewhere", category_id=other_category)
+    db.create_item(con, sku="C-1", name="Uncategorised")
+
+    assert [r["sku"] for r in db.list_items(con, category_id=category)] == ["A-1"]
+    assert [r["sku"] for r in db.list_items(con, area_id=area)] == ["A-1"]
+    assert [r["sku"] for r in db.list_items(con, area_id=other_area)] == ["B-1"]
 
 
 def test_an_item_with_no_movements_still_appears(con, item):
@@ -217,3 +410,25 @@ def test_print_job_log_upserts(con, item):
 def test_wal_and_foreign_keys_are_on(con):
     assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert con.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+# --------------------------------------------------------------- availability
+def test_availability_is_sufficient_when_no_min_qty_is_set():
+    """An item with no reorder point configured is never low or needing reorder."""
+    assert db.availability(qty=0, min_qty=0, low_qty=None) == "sufficient"
+
+
+@pytest.mark.parametrize("qty,min_qty,low_qty,expected", [
+    (2, 10, 15, "reorder"),      # at or below the hard threshold
+    (10, 10, 15, "reorder"),
+    (12, 10, 15, "low"),         # between the two thresholds
+    (15, 10, 15, "low"),
+    (16, 10, 15, "sufficient"),  # above both
+])
+def test_availability_tiers_progress_reorder_low_sufficient(qty, min_qty, low_qty, expected):
+    assert db.availability(qty, min_qty, low_qty) == expected
+
+
+def test_availability_without_a_low_qty_threshold_only_has_two_tiers():
+    assert db.availability(qty=5, min_qty=10, low_qty=None) == "reorder"
+    assert db.availability(qty=11, min_qty=10, low_qty=None) == "sufficient"

@@ -27,8 +27,20 @@ const el = {
   sku: $("#item-sku"),
   unit: $("#item-unit"),
   qty: $("#item-qty"),
+  availability: $("#item-availability"),
   moveQty: $("#move-qty"),
+  moveLot: $("#move-lot"),
   movements: $("#item-movements tbody"),
+
+  editCategory: $("#edit-category"),
+  editLocation: $("#edit-location"),
+  editSpecification: $("#edit-specification"),
+  editSupplier: $("#edit-supplier"),
+  editLeadTime: $("#edit-lead-time"),
+  editLowQty: $("#edit-low-qty"),
+
+  lots: $("#item-lots tbody"),
+  newLotCode: $("#new-lot-code"),
 
   newPanel: $("#new-item-panel"),
   unknownCode: $("#unknown-code"),
@@ -36,6 +48,7 @@ const el = {
   newSku: $("#new-sku"),
   newUnit: $("#new-unit"),
   newMin: $("#new-min"),
+  newCategory: $("#new-category"),
 
   copies: $("#copies"),
   symbology: $("#symbology"),
@@ -45,10 +58,24 @@ const el = {
   itemsEmpty: $("#items-empty"),
   search: $("#search"),
   lowOnly: $("#low-only"),
+  filterArea: $("#filter-area"),
+  filterCategory: $("#filter-category"),
+
+  areas: $("#areas tbody"),
+  newAreaName: $("#new-area-name"),
+  categories: $("#categories tbody"),
+  newCategoryArea: $("#new-category-area"),
+  newCategoryName: $("#new-category-name"),
+  locations: $("#locations tbody"),
+  newLocationCode: $("#new-location-code"),
+  newLocationName: $("#new-location-name"),
 };
 
 let currentItem = null;
 let bannerTimer = null;
+let areasCache = [];
+let categoriesCache = [];
+let locationsCache = [];
 
 /* ------------------------------------------------------------------ helpers */
 async function api(path, options = {}) {
@@ -85,6 +112,24 @@ function refocus() {
 
 const fmt = (n) => (Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : "—");
 
+/* Repopulates a <select> from a list of {id, ...}, keeping the previous
+   selection if it still exists among the new options. */
+function fillSelect(sel, list, placeholder, labelFn) {
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  sel.appendChild(opt0);
+  for (const item of list) {
+    const opt = document.createElement("option");
+    opt.value = item.id;
+    opt.textContent = labelFn ? labelFn(item) : item.name;
+    sel.appendChild(opt);
+  }
+  sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "";
+}
+
 /* --------------------------------------------------------------------- scan */
 async function doScan() {
   const code = el.scan.value.trim();
@@ -95,7 +140,7 @@ async function doScan() {
       body: JSON.stringify({ code }),
     });
     if (res.found) {
-      showItem(res.item, res.qty);
+      showItem(await api(`/api/items/${res.item.id}`));
     } else {
       showUnknown(res.code);
     }
@@ -115,30 +160,68 @@ function showUnknown(code) {
   el.newName.focus();
 }
 
-async function showItem(item, qty) {
+/* `item` is the full record from GET /api/items/{id}: qty, availability,
+   movements and lots all in one call. */
+function showItem(item) {
   currentItem = item;
   el.newPanel.hidden = true;
   el.panel.hidden = false;
-  el.name.textContent = item.name;
-  el.sku.textContent = item.sku;
-  el.unit.textContent = item.unit;
-  el.qty.textContent = fmt(qty);
   el.preview.hidden = true;
-  await loadMovements(item.id);
+  renderItem(item);
   refocus();
 }
 
 async function refreshItem() {
   if (!currentItem) return;
   const full = await api(`/api/items/${currentItem.id}`);
-  el.qty.textContent = fmt(full.qty);
-  renderMovements(full.movements);
+  currentItem = full;
+  renderItem(full);
 }
 
-async function loadMovements(itemId) {
-  try {
-    renderMovements(await api(`/api/movements?item_id=${itemId}&limit=8`));
-  } catch { renderMovements([]); }
+function renderItem(item) {
+  el.name.textContent = item.name;
+  el.sku.textContent = item.sku;
+  el.unit.textContent = item.unit;
+  el.qty.textContent = fmt(item.qty);
+  setAvailability(item.availability);
+  renderMovements(item.movements);
+  renderLots(item.lots, item.unit);
+  fillItemDetailForm(item);
+}
+
+function setAvailability(a) {
+  const labels = { sufficient: "Sufficient", low: "Low", reorder: "Reorder" };
+  const classes = { sufficient: "good", low: "warn", reorder: "bad" };
+  el.availability.textContent = labels[a] || "";
+  el.availability.className = `pill ${classes[a] || "muted"}`;
+}
+
+function fillItemDetailForm(item) {
+  el.editCategory.value = item.category_id ?? "";
+  el.editLocation.value = item.location_id ?? "";
+  el.editSpecification.value = item.specification || "";
+  el.editSupplier.value = item.supplier || "";
+  el.editLeadTime.value = item.lead_time_days ?? "";
+  el.editLowQty.value = item.low_qty ?? "";
+}
+
+function renderLots(list, unit) {
+  el.lots.innerHTML = "";
+  if (!list || !list.length) {
+    el.lots.innerHTML = '<tr><td class="muted">No lots recorded yet.</td></tr>';
+  } else {
+    for (const l of list) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${escapeHtml(l.code)}</td>` +
+        `<td class="num">${fmt(l.qty)} ${escapeHtml(unit || "")}</td>` +
+        `<td class="muted">${l.received_at ? escapeHtml(l.received_at) : ""}</td>` +
+        `<td><button data-archive-lot="${l.id}">Archive</button></td>`;
+      el.lots.appendChild(tr);
+    }
+  }
+  fillSelect(el.moveLot, (list || []).filter((l) => !l.archived), "(no lot)",
+            (l) => `${l.code} (${fmt(l.qty)})`);
 }
 
 function renderMovements(list) {
@@ -173,6 +256,7 @@ async function move(reason) {
     say("Enter a quantity greater than zero.", "error");
     return;
   }
+  const lotId = el.moveLot.value ? parseInt(el.moveLot.value, 10) : null;
   try {
     if (reason === "stocktake") {
       await api("/api/stocktake", {
@@ -184,11 +268,56 @@ async function move(reason) {
       const delta = reason === "issue" ? -amount : amount;
       await api("/api/movements", {
         method: "POST",
-        body: JSON.stringify({ item_id: currentItem.id, delta, reason }),
+        body: JSON.stringify({ item_id: currentItem.id, delta, reason, lot_id: lotId }),
       });
       say(`${reason === "issue" ? "Issued" : "Received"} ${fmt(amount)} ` +
           `${currentItem.unit} of ${currentItem.name}.`);
     }
+    await refreshItem();
+    await loadItems();
+  } catch (e) {
+    say(e.message, "error");
+  }
+  refocus();
+}
+
+async function addLot() {
+  if (!currentItem) return;
+  const code = el.newLotCode.value.trim();
+  if (!code) {
+    say("Enter a lot code.", "error");
+    return;
+  }
+  try {
+    await api("/api/lots", {
+      method: "POST",
+      body: JSON.stringify({ item_id: currentItem.id, code }),
+    });
+    el.newLotCode.value = "";
+    say(`Added lot ${code}.`);
+    await refreshItem();
+  } catch (e) {
+    say(e.message, "error");
+  }
+  refocus();
+}
+
+async function saveItemDetails() {
+  if (!currentItem) return;
+  const body = {
+    category_id: el.editCategory.value ? parseInt(el.editCategory.value, 10) : null,
+    location_id: el.editLocation.value ? parseInt(el.editLocation.value, 10) : null,
+    specification: el.editSpecification.value.trim() || null,
+    supplier: el.editSupplier.value.trim() || null,
+    lead_time_days: el.editLeadTime.value ? parseInt(el.editLeadTime.value, 10) : null,
+    low_qty: el.editLowQty.value ? parseFloat(el.editLowQty.value) : null,
+  };
+  try {
+    await api(`/api/items/${currentItem.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    say("Item details saved.");
     await refreshItem();
     await loadItems();
   } catch (e) {
@@ -202,6 +331,8 @@ async function loadItems() {
   const params = new URLSearchParams();
   if (el.search.value.trim()) params.set("search", el.search.value.trim());
   if (el.lowOnly.checked) params.set("low", "true");
+  if (el.filterArea.value) params.set("area_id", el.filterArea.value);
+  if (el.filterCategory.value) params.set("category_id", el.filterCategory.value);
   let list = [];
   try {
     list = await api(`/api/items?${params}`);
@@ -213,9 +344,13 @@ async function loadItems() {
   el.itemsEmpty.hidden = list.length > 0;
   for (const it of list) {
     const tr = document.createElement("tr");
-    if (it.qty <= it.min_qty) tr.className = "low";
+    if (it.availability === "reorder" || it.availability === "low") {
+      tr.className = it.availability;
+    }
+    const cat = categoriesCache.find((c) => c.id === it.category_id);
     tr.innerHTML =
       `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.sku)}</td>` +
+      `<td class="muted">${cat ? escapeHtml(cat.name) : ""}</td>` +
       `<td class="num">${fmt(it.qty)} ${escapeHtml(it.unit)}</td>` +
       `<td class="num muted">${fmt(it.min_qty)}</td>` +
       `<td><button data-open="${it.item_id}">Open</button></td>`;
@@ -229,6 +364,7 @@ async function createItem() {
     name: el.newName.value.trim(),
     unit: el.newUnit.value.trim() || "pcs",
     min_qty: parseFloat(el.newMin.value) || 0,
+    category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
   };
   if (!body.sku || !body.name) {
     say("An item needs both a name and a SKU.", "error");
@@ -240,8 +376,136 @@ async function createItem() {
       body: JSON.stringify(body),
     });
     say(`Added ${item.name}.`);
-    await showItem(item, 0);
+    showItem(await api(`/api/items/${item.id}`));
     await loadItems();
+  } catch (e) {
+    say(e.message, "error");
+  }
+}
+
+/* --------------------------------------------------- areas & categories & locations */
+async function loadAreas() {
+  try {
+    areasCache = await api("/api/areas");
+  } catch (e) {
+    say(e.message, "error");
+    return;
+  }
+  el.areas.innerHTML = "";
+  if (!areasCache.length) {
+    el.areas.innerHTML = '<tr><td class="muted">No areas yet.</td></tr>';
+  }
+  for (const a of areasCache) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(a.name)}</td>` +
+      `<td><button data-archive-area="${a.id}">Archive</button></td>`;
+    el.areas.appendChild(tr);
+  }
+  fillSelect(el.newCategoryArea, areasCache, "(choose an area)");
+  fillSelect(el.filterArea, areasCache, "All areas");
+}
+
+function areaName(areaId) {
+  const a = areasCache.find((x) => x.id === areaId);
+  return a ? a.name : "—";
+}
+
+async function loadCategories() {
+  try {
+    categoriesCache = await api("/api/categories");
+  } catch (e) {
+    say(e.message, "error");
+    return;
+  }
+  el.categories.innerHTML = "";
+  if (!categoriesCache.length) {
+    el.categories.innerHTML = '<tr><td class="muted">No categories yet.</td></tr>';
+  }
+  for (const c of categoriesCache) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(areaName(c.area_id))}</td><td>${escapeHtml(c.name)}</td>` +
+      `<td><button data-archive-category="${c.id}">Archive</button></td>`;
+    el.categories.appendChild(tr);
+  }
+  const label = (c) => `${areaName(c.area_id)} / ${c.name}`;
+  fillSelect(el.newCategory, categoriesCache, "—", label);
+  fillSelect(el.editCategory, categoriesCache, "—", label);
+  fillSelect(el.filterCategory, categoriesCache, "All categories", label);
+}
+
+async function loadLocations() {
+  try {
+    locationsCache = await api("/api/locations");
+  } catch (e) {
+    say(e.message, "error");
+    return;
+  }
+  el.locations.innerHTML = "";
+  if (!locationsCache.length) {
+    el.locations.innerHTML = '<tr><td class="muted">No locations yet.</td></tr>';
+  }
+  for (const l of locationsCache) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(l.code)}</td><td>${escapeHtml(l.name)}</td>` +
+      `<td><button data-archive-location="${l.id}">Archive</button></td>`;
+    el.locations.appendChild(tr);
+  }
+  fillSelect(el.editLocation, locationsCache, "—", (l) => `${l.code} — ${l.name}`);
+}
+
+async function addArea() {
+  const name = el.newAreaName.value.trim();
+  if (!name) {
+    say("Enter an area name.", "error");
+    return;
+  }
+  try {
+    await api("/api/areas", { method: "POST", body: JSON.stringify({ name }) });
+    el.newAreaName.value = "";
+    say(`Added area ${name}.`);
+    await loadAreas();
+  } catch (e) {
+    say(e.message, "error");
+  }
+}
+
+async function addCategory() {
+  const areaId = el.newCategoryArea.value;
+  const name = el.newCategoryName.value.trim();
+  if (!areaId) {
+    say("Choose an area first.", "error");
+    return;
+  }
+  if (!name) {
+    say("Enter a category name.", "error");
+    return;
+  }
+  try {
+    await api("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ area_id: parseInt(areaId, 10), name }),
+    });
+    el.newCategoryName.value = "";
+    say(`Added category ${name}.`);
+    await loadCategories();
+  } catch (e) {
+    say(e.message, "error");
+  }
+}
+
+async function addLocation() {
+  const code = el.newLocationCode.value.trim();
+  const name = el.newLocationName.value.trim();
+  if (!code || !name) {
+    say("Enter both a code and a name.", "error");
+    return;
+  }
+  try {
+    await api("/api/locations", { method: "POST", body: JSON.stringify({ code, name }) });
+    el.newLocationCode.value = "";
+    el.newLocationName.value = "";
+    say(`Added location ${code}.`);
+    await loadLocations();
   } catch (e) {
     say(e.message, "error");
   }
@@ -368,16 +632,57 @@ $("#btn-cancel-create").addEventListener("click", () => {
 });
 $("#btn-preview").addEventListener("click", preview);
 $("#btn-print").addEventListener("click", print);
+$("#btn-save-details").addEventListener("click", saveItemDetails);
+$("#btn-add-lot").addEventListener("click", addLot);
+$("#btn-add-area").addEventListener("click", addArea);
+$("#btn-add-category").addEventListener("click", addCategory);
+$("#btn-add-location").addEventListener("click", addLocation);
 
 el.items.addEventListener("click", async (e) => {
   const id = e.target.dataset.open;
   if (!id) return;
-  const full = await api(`/api/items/${id}`);
-  await showItem(full, full.qty);
+  showItem(await api(`/api/items/${id}`));
+});
+
+el.lots.addEventListener("click", async (e) => {
+  const id = e.target.dataset.archiveLot;
+  if (!id) return;
+  try {
+    await api(`/api/lots/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    await refreshItem();
+  } catch (err) { say(err.message, "error"); }
+});
+
+el.areas.addEventListener("click", async (e) => {
+  const id = e.target.dataset.archiveArea;
+  if (!id) return;
+  try {
+    await api(`/api/areas/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    await loadAreas();
+    await loadCategories();
+  } catch (err) { say(err.message, "error"); }
+});
+
+el.categories.addEventListener("click", async (e) => {
+  const id = e.target.dataset.archiveCategory;
+  if (!id) return;
+  try {
+    await api(`/api/categories/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    await loadCategories();
+  } catch (err) { say(err.message, "error"); }
+});
+
+el.locations.addEventListener("click", async (e) => {
+  const id = e.target.dataset.archiveLocation;
+  if (!id) return;
+  try {
+    await api(`/api/locations/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    await loadLocations();
+  } catch (err) { say(err.message, "error"); }
 });
 
 let searchTimer = null;
-for (const node of [el.search, el.lowOnly]) {
+for (const node of [el.search, el.lowOnly, el.filterArea, el.filterCategory]) {
   node.addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadItems, 200);
@@ -394,7 +699,15 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-loadItems();
+/* Areas must load before categories (categories show/label their area name)
+   and both before the items list (its Category column looks categoriesCache
+   up by id). */
+(async () => {
+  await loadAreas();
+  await loadCategories();
+  await loadLocations();
+  await loadItems();
+})();
 loadVersion();
 refreshPrinter();
 setInterval(refreshPrinter, 15000);

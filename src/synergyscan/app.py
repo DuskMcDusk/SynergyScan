@@ -108,6 +108,12 @@ class ItemIn(BaseModel):
     unit: str = "pcs"
     min_qty: float = 0
     barcode: str | None = None
+    category_id: int | None = None
+    location_id: int | None = None
+    specification: str | None = None
+    supplier: str | None = None
+    lead_time_days: int | None = None
+    low_qty: float | None = None
 
 
 class ItemPatch(BaseModel):
@@ -117,14 +123,68 @@ class ItemPatch(BaseModel):
     min_qty: float | None = None
     barcode: str | None = None
     archived: bool | None = None
+    category_id: int | None = None
+    location_id: int | None = None
+    specification: str | None = None
+    supplier: str | None = None
+    lead_time_days: int | None = None
+    low_qty: float | None = None
 
 
 class MovementIn(BaseModel):
     item_id: int
     delta: float
     reason: Literal["receive", "issue", "adjust", "stocktake", "move_in", "move_out"]
+    lot_id: int | None = None
     note: str | None = None
     actor: str | None = None
+
+
+class AreaIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class AreaPatch(BaseModel):
+    name: str | None = None
+    archived: bool | None = None
+
+
+class CategoryIn(BaseModel):
+    area_id: int
+    name: str = Field(min_length=1, max_length=100)
+
+
+class CategoryPatch(BaseModel):
+    area_id: int | None = None
+    name: str | None = None
+    archived: bool | None = None
+
+
+class LocationIn(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class LocationPatch(BaseModel):
+    code: str | None = None
+    name: str | None = None
+    archived: bool | None = None
+
+
+class LotIn(BaseModel):
+    item_id: int
+    code: str = Field(min_length=1, max_length=100)
+    received_at: str | None = None
+    expires_at: str | None = None
+    note: str | None = None
+
+
+class LotPatch(BaseModel):
+    code: str | None = None
+    received_at: str | None = None
+    expires_at: str | None = None
+    note: str | None = None
+    archived: bool | None = None
 
 
 class StocktakeIn(BaseModel):
@@ -196,19 +256,40 @@ def api_settings() -> dict:
 
 
 # -------------------------------------------------------------------- items
+def _with_availability(item: dict) -> dict:
+    item["availability"] = db.availability(item["qty"], item["min_qty"], item.get("low_qty"))
+    return item
+
+
 @app.get("/api/items")
 def api_items(con: Db, search: str | None = None,
               low: bool = Query(False, description="only items at or below min_qty"),
+              category_id: int | None = None, area_id: int | None = None,
               limit: int = Query(500, le=2000)) -> list[dict]:
-    return rows(db.list_items(con, search=search, low_only=low, limit=limit))
+    items = rows(db.list_items(con, search=search, low_only=low, limit=limit,
+                               category_id=category_id, area_id=area_id))
+    return [_with_availability(i) for i in items]
+
+
+def _check_item_refs(con: sqlite3.Connection, category_id: int | None,
+                     location_id: int | None) -> None:
+    """category_id/location_id are foreign keys; check them explicitly so a bad
+    id gets a clean 404 instead of surfacing as a confusing SKU/barcode 409."""
+    if category_id is not None and db.get_category(con, category_id) is None:
+        raise HTTPException(404, f"no category with id {category_id}")
+    if location_id is not None and db.get_location(con, location_id) is None:
+        raise HTTPException(404, f"no location with id {location_id}")
 
 
 @app.post("/api/items", status_code=201)
 def api_create_item(body: ItemIn, con: Db) -> dict:
+    _check_item_refs(con, body.category_id, body.location_id)
     try:
         item_id = db.create_item(con, **body.model_dump())
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that SKU or barcode is already in use ({e})") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return dict(db.get_item(con, item_id))        # type: ignore[arg-type]
 
 
@@ -217,8 +298,12 @@ def api_item(item_id: int, con: Db) -> dict:
     item = db.get_item(con, item_id)
     if item is None:
         raise HTTPException(404, f"no item with id {item_id}")
-    return {**dict(item), "qty": db.on_hand(con, item_id),
-            "movements": rows(db.movements(con, item_id, limit=50))}
+    qty = db.on_hand(con, item_id)
+    return _with_availability({
+        **dict(item), "qty": qty,
+        "movements": rows(db.movements(con, item_id, limit=50)),
+        "lots": rows(db.list_lots(con, item_id)),
+    })
 
 
 @app.patch("/api/items/{item_id}")
@@ -227,13 +312,111 @@ def api_patch_item(item_id: int, body: ItemPatch, con: Db) -> dict:
         raise HTTPException(404, f"no item with id {item_id}")
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
               if v is not None}
+    _check_item_refs(con, fields.get("category_id"), fields.get("location_id"))
     if "archived" in fields:
         fields["archived"] = int(bool(fields["archived"]))
     try:
         db.update_item(con, item_id, **fields)
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that barcode is already in use ({e})") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return dict(db.get_item(con, item_id))        # type: ignore[arg-type]
+
+
+# -------------------------------------------------------------------- areas
+@app.get("/api/areas")
+def api_areas(con: Db, include_archived: bool = False) -> list[dict]:
+    return rows(db.list_areas(con, include_archived=include_archived))
+
+
+@app.post("/api/areas", status_code=201)
+def api_create_area(body: AreaIn, con: Db) -> dict:
+    try:
+        area_id = db.create_area(con, **body.model_dump())
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that area name is already in use ({e})") from e
+    return dict(db.get_area(con, area_id))         # type: ignore[arg-type]
+
+
+@app.patch("/api/areas/{area_id}")
+def api_patch_area(area_id: int, body: AreaPatch, con: Db) -> dict:
+    if db.get_area(con, area_id) is None:
+        raise HTTPException(404, f"no area with id {area_id}")
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
+              if v is not None}
+    if "archived" in fields:
+        fields["archived"] = int(bool(fields["archived"]))
+    try:
+        db.update_area(con, area_id, **fields)
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that area name is already in use ({e})") from e
+    return dict(db.get_area(con, area_id))         # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------- categories
+@app.get("/api/categories")
+def api_categories(con: Db, area_id: int | None = None,
+                   include_archived: bool = False) -> list[dict]:
+    return rows(db.list_categories(con, area_id=area_id, include_archived=include_archived))
+
+
+@app.post("/api/categories", status_code=201)
+def api_create_category(body: CategoryIn, con: Db) -> dict:
+    if db.get_area(con, body.area_id) is None:
+        raise HTTPException(404, f"no area with id {body.area_id}")
+    try:
+        category_id = db.create_category(con, **body.model_dump())
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that category name is already in use in this area ({e})") from e
+    return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
+
+
+@app.patch("/api/categories/{category_id}")
+def api_patch_category(category_id: int, body: CategoryPatch, con: Db) -> dict:
+    if db.get_category(con, category_id) is None:
+        raise HTTPException(404, f"no category with id {category_id}")
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
+              if v is not None}
+    if "area_id" in fields and db.get_area(con, fields["area_id"]) is None:
+        raise HTTPException(404, f"no area with id {fields['area_id']}")
+    if "archived" in fields:
+        fields["archived"] = int(bool(fields["archived"]))
+    try:
+        db.update_category(con, category_id, **fields)
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that category name is already in use in this area ({e})") from e
+    return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
+
+
+# ----------------------------------------------------------------- locations
+@app.get("/api/locations")
+def api_locations(con: Db, include_archived: bool = False) -> list[dict]:
+    return rows(db.list_locations(con, include_archived=include_archived))
+
+
+@app.post("/api/locations", status_code=201)
+def api_create_location(body: LocationIn, con: Db) -> dict:
+    try:
+        location_id = db.create_location(con, **body.model_dump())
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that location code is already in use ({e})") from e
+    return dict(db.get_location(con, location_id))  # type: ignore[arg-type]
+
+
+@app.patch("/api/locations/{location_id}")
+def api_patch_location(location_id: int, body: LocationPatch, con: Db) -> dict:
+    if db.get_location(con, location_id) is None:
+        raise HTTPException(404, f"no location with id {location_id}")
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
+              if v is not None}
+    if "archived" in fields:
+        fields["archived"] = int(bool(fields["archived"]))
+    try:
+        db.update_location(con, location_id, **fields)
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that location code is already in use ({e})") from e
+    return dict(db.get_location(con, location_id))  # type: ignore[arg-type]
 
 
 # --------------------------------------------------------------------- scan
@@ -262,6 +445,8 @@ def api_movements(con: Db, item_id: int | None = None,
 def api_add_movement(body: MovementIn, con: Db) -> dict:
     if db.get_item(con, body.item_id) is None:
         raise HTTPException(404, f"no item with id {body.item_id}")
+    if body.lot_id is not None and db.get_lot(con, body.lot_id) is None:
+        raise HTTPException(404, f"no lot with id {body.lot_id}")
     try:
         mid = db.add_movement(con, **body.model_dump())
     except ValueError as e:
@@ -276,6 +461,40 @@ def api_stocktake(body: StocktakeIn, con: Db) -> dict:
     mid = db.set_stocktake(con, body.item_id, body.counted, actor=body.actor)
     return {"id": mid, "qty": db.on_hand(con, body.item_id),
             "changed": mid is not None}
+
+
+# ---------------------------------------------------------------------- lots
+@app.get("/api/lots")
+def api_lots(con: Db, item_id: int, include_archived: bool = False) -> list[dict]:
+    if db.get_item(con, item_id) is None:
+        raise HTTPException(404, f"no item with id {item_id}")
+    return rows(db.list_lots(con, item_id, include_archived=include_archived))
+
+
+@app.post("/api/lots", status_code=201)
+def api_create_lot(body: LotIn, con: Db) -> dict:
+    if db.get_item(con, body.item_id) is None:
+        raise HTTPException(404, f"no item with id {body.item_id}")
+    try:
+        lot_id = db.create_lot(con, **body.model_dump())
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that lot code is already in use for this item ({e})") from e
+    return dict(db.get_lot(con, lot_id))           # type: ignore[arg-type]
+
+
+@app.patch("/api/lots/{lot_id}")
+def api_patch_lot(lot_id: int, body: LotPatch, con: Db) -> dict:
+    if db.get_lot(con, lot_id) is None:
+        raise HTTPException(404, f"no lot with id {lot_id}")
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
+              if v is not None}
+    if "archived" in fields:
+        fields["archived"] = int(bool(fields["archived"]))
+    try:
+        db.update_lot(con, lot_id, **fields)
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(409, f"that lot code is already in use for this item ({e})") from e
+    return dict(db.get_lot(con, lot_id))           # type: ignore[arg-type]
 
 
 # -------------------------------------------------------------------- print

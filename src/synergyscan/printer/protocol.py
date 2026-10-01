@@ -125,6 +125,13 @@ def pack(bw) -> tuple[bytes, int]:
 
     Returns (data, columns). "Columns" is the image height: the printer counts
     printhead lines along the feed direction.
+
+    Across the tape the head burns dot HEAD_DOTS-1 first and dot 0 last -
+    right-to-left relative to image space - so a column's position is mirrored
+    before it is packed. Skipping this mirror prints every label backwards
+    (left-right flipped, text only readable held up to a mirror) while the
+    preview, which never goes through pack(), still looks correct - that
+    mismatch is how this was found.
     """
     w, h = bw.size
     crop = max(0, w - HEAD_DOTS) // 2        # 50 mm labels: trim ~1 mm per side
@@ -135,7 +142,7 @@ def pack(bw) -> tuple[bytes, int]:
         base = y * BPL
         for x in range(crop, min(w, crop + HEAD_DOTS)):
             if px[x, y] == 0:                # 0 = black = burn this dot
-                dot = x - crop + x_off
+                dot = HEAD_DOTS - 1 - (x - crop + x_off)
                 out[base + dot // 8] |= 1 << (dot % 8)
     return bytes(out), h
 
