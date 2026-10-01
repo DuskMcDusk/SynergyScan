@@ -144,6 +144,21 @@ contains the version, the printer's status, the database size and the recent log
 If the app won't open at all, run `C:\SynergyScan\SynergyScan-console.bat`
 instead of the desktop icon. It shows a black window with the error in it.
 
+### Restarting and updating from the app
+
+At the bottom of the left-hand menu:
+
+- **Restart** stops the app and starts it again in a few seconds. Handy when the
+  printer was plugged in after the app started. A restart also installs an
+  update if one is waiting.
+- **Check for updates** asks whether a newer version exists. The app also checks
+  quietly when it opens and every few hours; if there is one, a yellow bar at
+  the top offers **Update now**. The update downloads, is tested, and the app
+  restarts into it. If anything fails the current version stays installed and
+  nothing changes. Your data is never touched.
+
+Both buttons only work in an installed copy, not when running from source.
+
 ### Going back to the previous version
 
 If an update causes a problem, double-click **`C:\SynergyScan\rollback.bat`**.

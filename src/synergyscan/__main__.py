@@ -23,7 +23,7 @@ import argparse
 import logging
 import sys
 
-from . import config, db, doctor, logs, migrations, selfupdate
+from . import config, db, doctor, lifecycle, logs, migrations, selfupdate
 from .selfupdate import migrate
 from .selfupdate import version as relver
 
@@ -93,8 +93,17 @@ def main(argv: list[str] | None = None) -> int:
     port = a.port or settings.port
 
     import uvicorn
-    uvicorn.run("synergyscan.app:app", host=host, port=port, log_config=None,
-                access_log=False)
+    # A Server rather than uvicorn.run(), so the UI's Restart button can ask it
+    # to stop (lifecycle.request_restart) and we can tell that stop apart from
+    # an ordinary shutdown by the exit code the launcher is waiting for.
+    server = uvicorn.Server(uvicorn.Config(
+        "synergyscan.app:app", host=host, port=port, log_config=None,
+        access_log=False, timeout_graceful_shutdown=5))
+    lifecycle.register_server(server)
+    server.run()
+    if lifecycle.restart_requested():
+        log.info("exiting so the launcher restarts the app")
+        return selfupdate.RESTART_EXIT_CODE
     return 0
 
 
