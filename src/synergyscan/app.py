@@ -102,7 +102,7 @@ def rows(rs) -> list[dict[str, Any]]:
 
 # ------------------------------------------------------------------ schemas
 class ItemIn(BaseModel):
-    sku: str = Field(min_length=1, max_length=64)
+    sku: str = Field(default="", max_length=64)     # blank = generate
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     unit: str = "pcs"
@@ -150,12 +150,14 @@ class AreaPatch(BaseModel):
 class CategoryIn(BaseModel):
     area_id: int
     name: str = Field(min_length=1, max_length=100)
+    prefix: str | None = Field(default=None, max_length=8)   # blank = suggest
 
 
 class CategoryPatch(BaseModel):
     area_id: int | None = None
     name: str | None = None
     archived: bool | None = None
+    prefix: str | None = Field(default=None, max_length=8)
 
 
 class LocationIn(BaseModel):
@@ -215,7 +217,7 @@ def _spec_for(con: sqlite3.Connection, body: PrintIn) -> tuple[LabelSpec, int | 
         if item is None:
             raise HTTPException(404, f"no item with id {item_id}")
         if not lines:
-            lines = [item["name"], item["sku"]]
+            lines = [item["sku"]]       # SKU only, no product name
         if not value:
             value = item["barcode"] or item["sku"]
     spec = LabelSpec(
@@ -283,7 +285,8 @@ def _check_item_refs(con: sqlite3.Connection, category_id: int | None,
 def api_create_item(body: ItemIn, con: Db) -> dict:
     _check_item_refs(con, body.category_id, body.location_id)
     try:
-        item_id = db.create_item(con, **body.model_dump())
+        with db.tx(con):       # the SKU counter bump and the insert land together
+            item_id = db.create_item(con, **body.model_dump())
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that SKU or barcode is already in use ({e})") from e
     except ValueError as e:
@@ -359,6 +362,18 @@ def api_categories(con: Db, area_id: int | None = None,
     return rows(db.list_categories(con, area_id=area_id, include_archived=include_archived))
 
 
+@app.get("/api/next-sku")
+def api_next_sku(con: Db, category_id: int | None = None) -> dict:
+    """Preview of the SKU a new item in this category would get."""
+    _check_item_refs(con, category_id, None)
+    return {"sku": db.next_sku(con, category_id, reserve=False)}
+
+
+@app.get("/api/categories/suggest-prefix")
+def api_suggest_prefix(name: str, con: Db) -> dict:
+    return {"prefix": db.suggest_prefix(con, name)}
+
+
 @app.post("/api/categories", status_code=201)
 def api_create_category(body: CategoryIn, con: Db) -> dict:
     if db.get_area(con, body.area_id) is None:
@@ -367,6 +382,8 @@ def api_create_category(body: CategoryIn, con: Db) -> dict:
         category_id = db.create_category(con, **body.model_dump())
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that category name is already in use in this area ({e})") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
 
 
@@ -384,6 +401,8 @@ def api_patch_category(category_id: int, body: CategoryPatch, con: Db) -> dict:
         db.update_category(con, category_id, **fields)
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that category name is already in use in this area ({e})") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
 
 

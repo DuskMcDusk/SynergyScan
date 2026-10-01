@@ -65,6 +65,7 @@ const el = {
   categories: $("#categories tbody"),
   newCategoryArea: $("#new-category-area"),
   newCategoryName: $("#new-category-name"),
+  newCategoryPrefix: $("#new-category-prefix"),
   locations: $("#locations tbody"),
   newLocationCode: $("#new-location-code"),
   newLocationName: $("#new-location-name"),
@@ -149,14 +150,34 @@ async function doScan() {
   el.scan.value = "";
 }
 
+let scannedCode = "";
+let suggestedSku = "";
+
 function showUnknown(code) {
   currentItem = null;
+  scannedCode = code;
+  suggestedSku = "";
   el.panel.hidden = true;
   el.newPanel.hidden = false;
   el.unknownCode.textContent = code;
-  el.newSku.value = code;
+  el.newSku.value = "";
   el.newName.value = "";
+  el.newCategory.value = "";
   el.newName.focus();
+}
+
+/* Picking a category fills the SKU with the one the server would generate, so
+   it can be seen (and overridden) before saving. A SKU the user has typed over
+   is left alone. */
+async function prefillSku() {
+  const typed = el.newSku.value.trim();
+  if (typed && typed !== suggestedSku && typed !== scannedCode) return;
+  const cat = el.newCategory.value;
+  try {
+    const r = await api("/api/next-sku" + (cat ? `?category_id=${cat}` : ""));
+    suggestedSku = r.sku;
+    el.newSku.value = r.sku;
+  } catch { /* the field stays as it was; the server generates one on save */ }
 }
 
 /* `item` is the full record from GET /api/items/{id}: qty, availability,
@@ -357,14 +378,19 @@ async function loadItems() {
 
 async function createItem() {
   const body = {
-    sku: el.newSku.value.trim(),
+    sku: el.newSku.value.trim() === suggestedSku ? "" : el.newSku.value.trim(),
     name: el.newName.value.trim(),
     unit: el.newUnit.value.trim() || "pcs",
     min_qty: parseFloat(el.newMin.value) || 0,
     category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
   };
-  if (!body.sku || !body.name) {
-    say("An item needs both a name and a SKU.", "error");
+  /* The scanned label keeps working when the SKU differs from it. */
+  const finalSku = body.sku || suggestedSku;
+  if (scannedCode && scannedCode.toLowerCase() !== finalSku.toLowerCase()) {
+    body.barcode = scannedCode;
+  }
+  if (!body.name) {
+    say("An item needs a name.", "error");
     return;
   }
   try {
@@ -421,6 +447,7 @@ async function loadCategories() {
   for (const c of categoriesCache) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${escapeHtml(areaName(c.area_id))}</td><td>${escapeHtml(c.name)}</td>` +
+      `<td><code>${escapeHtml(c.prefix || "")}</code></td>` +
       `<td><button data-archive-category="${c.id}">Archive</button></td>`;
     el.categories.appendChild(tr);
   }
@@ -480,9 +507,13 @@ async function addCategory() {
   try {
     await api("/api/categories", {
       method: "POST",
-      body: JSON.stringify({ area_id: parseInt(areaId, 10), name }),
+      body: JSON.stringify({
+        area_id: parseInt(areaId, 10), name,
+        prefix: el.newCategoryPrefix.value.trim() || null,
+      }),
     });
     el.newCategoryName.value = "";
+    el.newCategoryPrefix.value = "";
     say(`Added category ${name}.`);
     await loadCategories();
   } catch (e) {
@@ -633,6 +664,16 @@ $("#btn-save-details").addEventListener("click", saveItemDetails);
 $("#btn-add-lot").addEventListener("click", addLot);
 $("#btn-add-area").addEventListener("click", addArea);
 $("#btn-add-category").addEventListener("click", addCategory);
+el.newCategory.addEventListener("change", prefillSku);
+/* Show the prefix the server would pick as a placeholder while typing a name. */
+el.newCategoryName.addEventListener("input", async () => {
+  const name = el.newCategoryName.value.trim();
+  if (!name) { el.newCategoryPrefix.placeholder = "auto"; return; }
+  try {
+    const r = await api(`/api/categories/suggest-prefix?name=${encodeURIComponent(name)}`);
+    el.newCategoryPrefix.placeholder = r.prefix;
+  } catch { /* the placeholder is a convenience only */ }
+});
 $("#btn-add-location").addEventListener("click", addLocation);
 
 el.items.addEventListener("click", async (e) => {

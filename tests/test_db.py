@@ -429,3 +429,64 @@ def test_availability_tiers_progress_reorder_low_sufficient(qty, min_qty, low_qt
 def test_availability_without_a_low_qty_threshold_only_has_two_tiers():
     assert db.availability(qty=5, min_qty=10, low_qty=None) == "reorder"
     assert db.availability(qty=11, min_qty=10, low_qty=None) == "sufficient"
+
+
+# ------------------------------------------------------- generated SKUs
+def _category(con, name, **kw):
+    return db.create_category(con, db.create_area(con, f"Area {name}"), name, **kw)
+
+
+def test_prefix_is_suggested_from_the_category_name(con):
+    assert db.get_category(con, _category(con, "Foam"))["prefix"] == "FOAM"
+    assert db.get_category(con, _category(con, "Bipolar Plates"))["prefix"] == "BP"
+    assert db.get_category(con, _category(con, "Membranes"))["prefix"] == "MEMB"
+
+
+def test_taken_prefix_gets_a_numeric_suffix(con):
+    _category(con, "Foam")
+    assert db.get_category(con, _category(con, "Foam rolls"))["prefix"] == "FR"
+    assert db.get_category(con, _category(con, "Foams"))["prefix"] == "FOAM2"
+
+
+def test_manual_prefix_is_validated(con):
+    _category(con, "Foam")
+    for bad in ("foam", "ITM", "no way"):
+        with pytest.raises(ValueError):
+            _category(con, f"X{bad}", prefix=bad)
+
+
+def test_blank_sku_is_generated_and_never_reused(con):
+    cat = _category(con, "Fittings")
+    a = db.create_item(con, sku="", name="a", category_id=cat)
+    b = db.create_item(con, sku="", name="b", category_id=cat)
+    assert db.get_item(con, a)["sku"] == "FITT-0001"
+    assert db.get_item(con, b)["sku"] == "FITT-0002"
+    db.update_item(con, b, archived=1)
+    assert db.get_item(con, db.create_item(con, sku="", name="c", category_id=cat))["sku"] == "FITT-0003"
+
+
+def test_generation_skips_skus_already_in_use(con):
+    cat = _category(con, "Fittings")
+    db.create_item(con, sku="fitt-0001", name="manual", category_id=cat)
+    assert db.get_item(con, db.create_item(con, sku="", name="x", category_id=cat))["sku"] == "FITT-0002"
+
+
+def test_uncategorised_items_use_the_fallback_prefix(con):
+    a = db.create_item(con, sku="", name="a")
+    b = db.create_item(con, sku="", name="b")
+    assert [db.get_item(con, i)["sku"] for i in (a, b)] == ["ITM-0001", "ITM-0002"]
+
+
+def test_prefix_locks_once_the_category_has_items(con):
+    cat = _category(con, "Foam")
+    db.update_category(con, cat, prefix="FM")          # still free to change
+    db.create_item(con, sku="", name="a", category_id=cat)
+    with pytest.raises(ValueError):
+        db.update_category(con, cat, prefix="FOAM")
+    db.update_category(con, cat, prefix="FM")          # unchanged value is fine
+
+
+def test_existing_categories_are_backfilled(con):
+    area = db.create_area(con, "Old")
+    con.execute("INSERT INTO categories (area_id, name) VALUES (?, 'Tubing')", (area,))
+    assert [r["prefix"] for r in db.list_categories(con)] == ["TUBI"]

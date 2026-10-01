@@ -138,11 +138,11 @@
     <div class="row wrap gap">
       <div class="field grow">
         <label for="new-name">Name</label>
-        <input id="new-name" type="text" placeholder="e.g. Pasta di semola 500 g">
+        <input id="new-name" type="text" placeholder="e.g. Fe foam, 60 ppi, 3 mm">
       </div>
       <div class="field">
         <label for="new-sku">SKU</label>
-        <input id="new-sku" type="text">
+        <input id="new-sku" type="text" placeholder="auto">
       </div>
       <div class="field">
         <label for="new-unit">Unit</label>
@@ -187,6 +187,10 @@
         <div class="field">
           <label for="new-category-name">New category</label>
           <input id="new-category-name" type="text" placeholder="e.g. Electrodes">
+        </div>
+        <div class="field">
+          <label for="new-category-prefix">SKU prefix</label>
+          <input id="new-category-prefix" type="text" maxlength="8" placeholder="auto">
         </div>
         <button id="btn-add-category">Add category</button>
       </div>

@@ -11,7 +11,9 @@ WAL is on so a long read (a stocktake report) never blocks a scan from writing.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -83,11 +85,12 @@ def _check_thresholds(min_qty: float | None, low_qty: float | None) -> None:
 
 def create_item(con: sqlite3.Connection, sku: str, name: str, **kw: Any) -> int:
     _check_thresholds(kw.get("min_qty", 0), kw.get("low_qty"))
+    sku = sku.strip() or next_sku(con, kw.get("category_id"))
     cur = con.execute(
         "INSERT INTO items (sku, name, description, unit, min_qty, barcode, "
         "category_id, location_id, supplier, lead_time_days, "
         "low_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (sku.strip(), name.strip(), kw.get("description"), kw.get("unit", "pcs"),
+        (sku, name.strip(), kw.get("description"), kw.get("unit", "pcs"),
          kw.get("min_qty", 0), (kw.get("barcode") or None),
          kw.get("category_id"), kw.get("location_id"), kw.get("supplier"),
          kw.get("lead_time_days"), kw.get("low_qty")),
@@ -217,16 +220,103 @@ def list_areas(con: sqlite3.Connection, include_archived: bool = False) -> list[
 
 
 # -------------------------------------------------------------- categories
+FALLBACK_PREFIX = "ITM"       # items with no category; never given to a category
+PREFIX_RE = re.compile(r"^[A-Z0-9]{1,8}$")
+
+
+def suggest_prefix(con: sqlite3.Connection, name: str) -> str:
+    """Derive a unique SKU prefix from a category name.
+
+    One word: its first 4 letters (Foam -> FOAM). Several words: their
+    initials (Bipolar Plates -> BP). A taken prefix gets a numeric suffix.
+    """
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    words = re.findall(r"[A-Z0-9]+", ascii_name.upper())
+    if not words:
+        base = "CAT"
+    elif len(words) == 1:
+        base = words[0][:4]
+    else:
+        base = "".join(w[0] for w in words)[:4]
+    taken = {r[0].upper() for r in con.execute(
+        "SELECT prefix FROM categories WHERE prefix IS NOT NULL")}
+    taken.add(FALLBACK_PREFIX)
+    candidate, n = base, 1
+    while candidate in taken:
+        n += 1
+        candidate = f"{base}{n}"
+    return candidate
+
+
+def _clean_prefix(con: sqlite3.Connection, prefix: str,
+                  category_id: int | None = None) -> str:
+    prefix = prefix.strip().upper()
+    if not PREFIX_RE.match(prefix):
+        raise ValueError("prefix must be 1-8 letters or digits")
+    if prefix == FALLBACK_PREFIX:
+        raise ValueError(f"{FALLBACK_PREFIX} is reserved for items without a category")
+    row = con.execute("SELECT id FROM categories WHERE prefix = ? COLLATE NOCASE",
+                      (prefix,)).fetchone()
+    if row is not None and row["id"] != category_id:
+        raise ValueError(f"prefix {prefix} is already used by another category")
+    return prefix
+
+
+def backfill_prefixes(con: sqlite3.Connection) -> None:
+    """Give every category that predates prefixes one, derived from its name."""
+    pending = con.execute(
+        "SELECT id, name FROM categories WHERE prefix IS NULL ORDER BY id").fetchall()
+    for r in pending:
+        con.execute("UPDATE categories SET prefix = ? WHERE id = ?",
+                    (suggest_prefix(con, r["name"]), r["id"]))
+
+
+def next_sku(con: sqlite3.Connection, category_id: int | None,
+             reserve: bool = True) -> str:
+    """Next free PREFIX-NNNN. Numbers are never reused and any SKU already in
+    use (typed by hand, or from before generation existed) is skipped.
+    reserve=False only previews it, leaving the counter alone."""
+    if category_id is None:
+        prefix, seq = FALLBACK_PREFIX, None
+    else:
+        backfill_prefixes(con)
+        cat = con.execute("SELECT prefix, next_seq FROM categories WHERE id = ?",
+                          (category_id,)).fetchone()
+        if cat is None:
+            raise ValueError(f"no category with id {category_id}")
+        prefix, seq = cat["prefix"], cat["next_seq"]
+    if seq is None:
+        r = con.execute(
+            "SELECT MAX(CAST(SUBSTR(sku, ?) AS INTEGER)) AS m FROM items "
+            "WHERE sku LIKE ? COLLATE NOCASE", (len(prefix) + 2, prefix + "-%")).fetchone()
+        seq = (r["m"] or 0) + 1
+    while con.execute("SELECT 1 FROM items WHERE sku = ? COLLATE NOCASE",
+                      (f"{prefix}-{seq:04d}",)).fetchone():
+        seq += 1
+    if category_id is not None and reserve:
+        con.execute("UPDATE categories SET next_seq = ? WHERE id = ?",
+                    (seq + 1, category_id))
+    return f"{prefix}-{seq:04d}"
+
+
 def create_category(con: sqlite3.Connection, area_id: int, name: str, **kw: Any) -> int:
+    prefix = (kw.get("prefix") or "").strip()
+    prefix = _clean_prefix(con, prefix) if prefix else suggest_prefix(con, name)
     cur = con.execute(
-        "INSERT INTO categories (area_id, name, archived) VALUES (?, ?, ?)",
-        (area_id, name.strip(), int(bool(kw.get("archived", 0)))),
+        "INSERT INTO categories (area_id, name, archived, prefix) VALUES (?, ?, ?, ?)",
+        (area_id, name.strip(), int(bool(kw.get("archived", 0))), prefix),
     )
     return int(cur.lastrowid)
 
 
 def update_category(con: sqlite3.Connection, category_id: int, **kw: Any) -> None:
-    fields = [k for k in ("area_id", "name", "archived") if k in kw]
+    if "prefix" in kw:
+        current = get_category(con, category_id)
+        kw["prefix"] = _clean_prefix(con, kw["prefix"], category_id)
+        if current is not None and kw["prefix"] != current["prefix"] and con.execute(
+                "SELECT 1 FROM items WHERE category_id = ?", (category_id,)).fetchone():
+            raise ValueError("the prefix is locked once the category has items")
+    fields = [k for k in ("area_id", "name", "archived", "prefix") if k in kw]
     if not fields:
         return
     sets = ", ".join(f"{f} = ?" for f in fields)
@@ -235,11 +325,13 @@ def update_category(con: sqlite3.Connection, category_id: int, **kw: Any) -> Non
 
 
 def get_category(con: sqlite3.Connection, category_id: int) -> sqlite3.Row | None:
+    backfill_prefixes(con)
     return con.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
 
 
 def list_categories(con: sqlite3.Connection, area_id: int | None = None,
                     include_archived: bool = False) -> list[sqlite3.Row]:
+    backfill_prefixes(con)
     sql = ["SELECT * FROM categories"]
     where = []
     args: list[Any] = []

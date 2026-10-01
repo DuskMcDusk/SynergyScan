@@ -303,13 +303,13 @@ def test_preview_returns_a_png_without_any_printer(client):
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_preview_uses_the_item_name_and_sku_by_default(client):
+def test_preview_uses_only_the_sku_by_default(client):
     item = client.post("/api/items", json={"sku": "SKU-0042",
                                            "name": "Pasta"}).json()
     a = client.post("/api/print/preview", json={"item_id": item["id"]}).content
     b = client.post("/api/print/preview",
                     json={"item_id": item["id"],
-                          "lines": ["Pasta", "SKU-0042"]}).content
+                          "lines": ["SKU-0042"]}).content
     assert a == b
 
 
@@ -455,3 +455,26 @@ def test_the_worker_survives_a_job_that_raises(no_printer, monkeypatch):
         assert svc._worker is not None and svc._worker.is_alive()
     finally:
         svc.stop()
+
+
+def test_next_sku_previews_without_consuming_the_number(client):
+    area = client.post("/api/areas", json={"name": "Chemistry"}).json()
+    cat = client.post("/api/categories",
+                      json={"area_id": area["id"], "name": "Solvents"}).json()
+    url = f"/api/next-sku?category_id={cat['id']}"
+    assert client.get(url).json() == {"sku": "SOLV-0001"}
+    assert client.get(url).json() == {"sku": "SOLV-0001"}     # still unused
+    item = client.post("/api/items", json={"name": "Acetone", "category_id": cat["id"]}).json()
+    assert item["sku"] == "SOLV-0001"
+    assert client.get(url).json() == {"sku": "SOLV-0002"}
+    assert client.get("/api/next-sku").json() == {"sku": "ITM-0001"}
+    assert client.get("/api/next-sku?category_id=9999").status_code == 404
+
+
+def test_item_label_carries_the_sku_but_not_the_product_name(client, con):
+    from synergyscan import app as appmod
+
+    item = client.post("/api/items", json={"sku": "A-9", "name": "Widget"}).json()
+    spec, _ = appmod._spec_for(con, appmod.PrintIn(item_id=item["id"]))
+    assert spec.lines == ["A-9"]
+    assert spec.barcode.value == "A-9"
