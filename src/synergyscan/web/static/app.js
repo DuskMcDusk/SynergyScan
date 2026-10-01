@@ -213,11 +213,22 @@ function showUnknown(code) {
   suggestedSku = "";
   el.panel.hidden = true;
   el.newPanel.hidden = false;
+  $("#new-title").textContent = "Not in the system yet";
+  $("#new-lead").hidden = false;
   el.unknownCode.textContent = code;
   el.newSku.value = "";
   el.newName.value = "";
   el.newCategory.value = "";
   el.newName.focus();
+}
+
+/* The "Add" button: the same form, opened by hand with no scanned code. The
+   SKU is suggested straight away since there is no scan to fall back on. */
+function showNewItem() {
+  showUnknown("");
+  $("#new-title").textContent = "New item";
+  $("#new-lead").hidden = true;
+  prefillSku();
 }
 
 /* Picking a category fills the SKU with the one the server would generate, so
@@ -767,6 +778,7 @@ el.scan.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); doScan(); }
 });
 el.scanGo.addEventListener("click", doScan);
+$("#btn-new-item").addEventListener("click", showNewItem);
 
 for (const btn of document.querySelectorAll("[data-reason]")) {
   btn.addEventListener("click", () => move(btn.dataset.reason));
