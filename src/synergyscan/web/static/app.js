@@ -61,6 +61,7 @@ const el = {
   filterCategory: $("#filter-category"),
 
   nav: $("#nav"),
+  recent: $("#recent tbody"),
   tileReorder: $("#tile-reorder"),
   tileLow: $("#tile-low"),
   countReorder: $("#count-reorder"),
@@ -140,6 +141,48 @@ function fillSelect(sel, list, placeholder, labelFn) {
   sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "";
 }
 
+/* -------------------------------------------------------------------- views
+ * Three screens, one at a time: Scan (the item in hand), Stock (the list) and
+ * Setup. The scan field stays on every screen; a successful scan or an Open
+ * click always lands on Scan, where the item is. The URL hash records the
+ * screen so reload and back/forward work. */
+const VIEWS = ["scan", "stock", "setup"];
+let view = "scan";
+
+function showView(name) {
+  if (!VIEWS.includes(name)) name = "scan";
+  view = name;
+  for (const v of VIEWS) $(`#view-${v}`).hidden = v !== name;
+  for (const a of document.querySelectorAll(".nav-link.main")) {
+    a.classList.toggle("on", a.dataset.view === name);
+  }
+  document.body.dataset.view = name;
+  if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
+  if (name === "scan") { loadRecent(); refocus(); }
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+
+async function loadRecent() {
+  let list = [];
+  try { list = await api("/api/movements?limit=8"); } catch { /* cosmetic */ }
+  el.recent.innerHTML = "";
+  if (!list.length) {
+    el.recent.innerHTML = '<tr><td class="muted">Nothing booked yet. Scan something to get started.</td></tr>';
+    return;
+  }
+  for (const m of list) {
+    const tr = document.createElement("tr");
+    const sign = m.delta > 0 ? "+" : "";
+    tr.innerHTML =
+      `<td class="muted">${m.created_at}</td>` +
+      `<td>${escapeHtml(m.name)} <span class="muted">${escapeHtml(m.sku)}</span></td>` +
+      `<td>${m.reason}</td><td class="num">${sign}${fmt(m.delta)}</td>`;
+    el.recent.appendChild(tr);
+  }
+}
+
 /* --------------------------------------------------------------------- scan */
 async function doScan() {
   const code = el.scan.value.trim();
@@ -164,6 +207,7 @@ let scannedCode = "";
 let suggestedSku = "";
 
 function showUnknown(code) {
+  showView("scan");
   currentItem = null;
   scannedCode = code;
   suggestedSku = "";
@@ -193,6 +237,7 @@ async function prefillSku() {
 /* `item` is the full record from GET /api/items/{id}: qty, availability,
    movements and lots all in one call. */
 function showItem(item) {
+  showView("scan");
   currentItem = item;
   el.newPanel.hidden = true;
   el.panel.hidden = false;
@@ -304,6 +349,7 @@ async function move(reason) {
     }
     await refreshItem();
     await loadItems();
+    loadRecent();
   } catch (e) {
     say(e.message, "error");
   }
@@ -798,9 +844,8 @@ el.nav.addEventListener("click", (e) => {
   e.preventDefault();
   el.filterArea.value = a.dataset.area;
   el.filterCategory.value = a.dataset.category;
+  showView("stock");
   loadItems();
-  $("#stock").scrollIntoView({ behavior: "smooth" });
-  refocus();
 });
 
 /* The tiles toggle a filter on availability; clicking the active one clears it. */
@@ -808,14 +853,8 @@ for (const [tile, which] of [[el.tileReorder, "reorder"], [el.tileLow, "low"]]) 
   tile.addEventListener("click", () => {
     availFilter = availFilter === which ? "" : which;
     loadItems();
-    refocus();
   });
 }
-
-$("#nav-setup").addEventListener("click", (e) => {
-  e.preventDefault();
-  $("#setup").scrollIntoView({ behavior: "smooth" });
-});
 
 let searchTimer = null;
 for (const node of [el.search, el.lowOnly, el.filterArea, el.filterCategory]) {
@@ -843,6 +882,7 @@ document.addEventListener("keydown", (e) => {
   await loadCategories();
   await loadLocations();
   await loadItems();
+  showView(location.hash.slice(1));
 })();
 loadVersion();
 refreshPrinter();

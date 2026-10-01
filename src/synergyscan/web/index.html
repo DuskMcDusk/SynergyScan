@@ -18,9 +18,13 @@
     <span class="brand-word" aria-label="Sinergy Flow"><span class="sinergy">SINERGY</span><span class="flow">FLOW</span></span>
     <span class="brand-product">Scan</span>
   </h1>
-  <nav id="nav" aria-label="Areas and categories"></nav>
-  <div class="nav-title">Setup</div>
-  <a class="nav-link" href="#setup" id="nav-setup">Areas, categories &amp; locations</a>
+  <nav class="mainnav" aria-label="Sections">
+    <a href="#scan" class="nav-link main" data-view="scan"><span>Scan</span></a>
+    <a href="#stock" class="nav-link main" data-view="stock"><span>Stock</span></a>
+    <!-- Area > Category tree: shown under Stock, only while Stock is open. -->
+    <div id="nav" aria-label="Areas and categories"></div>
+    <a href="#setup" class="nav-link main" data-view="setup"><span>Setup</span></a>
+  </nav>
   <div class="side-foot">
     <span id="version" class="pill muted"></span>
     <a href="/api/doctor" target="_blank">Diagnostics</a> ·
@@ -43,6 +47,7 @@
 <div id="banner" class="banner" hidden></div>
 
 <main>
+<div id="view-scan" class="view">
   <!-- Shown when a scan resolves to an item -->
   <section id="item-panel" class="card" hidden>
     <div class="row between">
@@ -170,6 +175,13 @@
     </div>
   </section>
 
+  <section class="card" id="recent-card">
+    <h2>Recent activity</h2>
+    <table id="recent" class="compact"><tbody></tbody></table>
+  </section>
+</div>
+
+<div id="view-stock" class="view" hidden>
   <section class="tiles" aria-label="Summary">
   <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
     <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
@@ -189,7 +201,7 @@
   </div>
 </section>
 
-  <section class="card" id="stock">
+  <section class="card">
     <div class="row between wrap">
       <h2>Stock</h2>
       <div class="row gap wrap">
@@ -212,7 +224,10 @@
   </section>
   <!-- Setup: the Area -> Category -> Item hierarchy and physical Locations
        are all user-managed here, not fixed in the code. -->
-  <section class="card" id="setup">
+</div>
+
+<div id="view-setup" class="view" hidden>
+  <section class="card">
     <h2>Areas, categories &amp; locations</h2>
     <details class="labels" open>
       <summary>Areas</summary>
@@ -260,7 +275,7 @@
       </div>
     </details>
   </section>
-
+</div>
 </main>
 
 </div>
