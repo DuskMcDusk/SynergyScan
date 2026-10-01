@@ -42,25 +42,6 @@
 
 <div id="banner" class="banner" hidden></div>
 
-<section class="tiles" aria-label="Summary">
-  <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
-    <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
-    <span class="pill bad">act now</span>
-  </button>
-  <button class="tile" id="tile-low" type="button" title="Show items that are running low">
-    <span class="label">Low stock</span><span class="n" id="count-low">–</span>
-    <span class="pill warn">watch</span>
-  </button>
-  <div class="tile">
-    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
-    <span class="muted small" id="count-areas"></span>
-  </div>
-  <div class="tile">
-    <span class="label">Printer</span>
-    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
-  </div>
-</section>
-
 <main>
   <!-- Shown when a scan resolves to an item -->
   <section id="item-panel" class="card" hidden>
@@ -189,7 +170,26 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="tiles" aria-label="Summary">
+  <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
+    <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
+    <span class="pill bad">act now</span>
+  </button>
+  <button class="tile" id="tile-low" type="button" title="Show items that are running low">
+    <span class="label">Low stock</span><span class="n" id="count-low">–</span>
+    <span class="pill warn">watch</span>
+  </button>
+  <div class="tile">
+    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
+    <span class="muted small" id="count-areas"></span>
+  </div>
+  <div class="tile">
+    <span class="label">Printer</span>
+    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
+  </div>
+</section>
+
+  <section class="card" id="stock">
     <div class="row between wrap">
       <h2>Stock</h2>
       <div class="row gap wrap">

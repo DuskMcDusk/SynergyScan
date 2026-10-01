@@ -799,6 +799,7 @@ el.nav.addEventListener("click", (e) => {
   el.filterArea.value = a.dataset.area;
   el.filterCategory.value = a.dataset.category;
   loadItems();
+  $("#stock").scrollIntoView({ behavior: "smooth" });
   refocus();
 });
 
