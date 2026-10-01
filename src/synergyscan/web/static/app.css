@@ -120,13 +120,9 @@ body[data-view="stock"] #nav { display: block; }
 
 .content { padding: 20px 24px 40px; min-width: 0; max-width: 1100px; width: 100%; }
 
-/* Logo: SINERGY in bold, FLOW in thin (the font "goes from Bold to Thin"),
-   with the infinity mark standing in for the O. */
+/* The logo artwork is dark on white, so it sits on a white tile in the dark sidebar. */
 .brand { display: flex; align-items: center; gap: 14px; }
-.brand-mark { height: 36px; width: auto; flex: none; }
-.brand-word { display: flex; flex-direction: column; line-height: 1; }
-.brand-word .sinergy { font-weight: 800; font-size: 1.25rem; letter-spacing: 0.04em; }
-.brand-word .flow { font-weight: 200; font-size: 1rem; letter-spacing: 0.5em; margin-top: 3px; }
+.brand-logo { height: 40px; width: auto; flex: none; background: #fff; border-radius: 4px; padding: 4px 8px; }
 .brand-product {
   font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em;
   color: var(--brand-yellow); padding-left: 14px; border-left: 1px solid #ffffff44;
