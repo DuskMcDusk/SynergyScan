@@ -649,6 +649,11 @@ def logo_png() -> FileResponse:
     return FileResponse(WEB / "static" / "logo.png", media_type="image/png")
 
 
+@app.get("/favicon.png")
+def favicon_png() -> FileResponse:
+    return FileResponse(WEB / "static" / "favicon.png", media_type="image/png")
+
+
 @app.get("/app.css")
 def app_css() -> FileResponse:
     return FileResponse(WEB / "static" / "app.css", media_type="text/css")
