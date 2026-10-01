@@ -27,13 +27,30 @@
   </nav>
   <div class="side-foot">
     <span id="version" class="pill muted"></span>
-    <a href="/api/doctor" target="_blank">Diagnostics</a> ·
-    <a href="/api/logs" target="_blank">Log</a> ·
-    <a href="/api/docs" target="_blank">API</a>
+    <div class="foot-actions">
+      <button id="btn-check-update" type="button" class="side-btn">Check for updates</button>
+      <button id="btn-restart" type="button" class="side-btn">Restart</button>
+    </div>
+    <div class="foot-links">
+      <a href="/api/doctor" target="_blank">Diagnostics</a> ·
+      <a href="/api/logs" target="_blank">Log</a> ·
+      <a href="/api/docs" target="_blank">API</a>
+    </div>
   </div>
 </aside>
 
 <div class="content">
+
+<!-- Shown only when the update channel offers a newer release. -->
+<div id="update-bar" class="update-bar" hidden>
+  <div><strong>A new version is available</strong>
+    <span id="update-version"></span>
+    <span id="update-notes" class="muted"></span></div>
+  <div class="row gap">
+    <button id="btn-update-now" type="button" class="primary">Update now</button>
+    <button id="btn-update-later" type="button">Later</button>
+  </div>
+</div>
 
 <!-- The scan field is the app's front door: always present, always focused.
      A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
@@ -281,6 +298,18 @@
 </main>
 
 </div>
+</div>
+
+<!-- Blocks the screen while the app restarts or updates, and doubles as the
+     confirmation prompt, so the user always knows what is about to happen. -->
+<div id="overlay" class="overlay" role="alertdialog" aria-live="polite"
+     aria-labelledby="overlay-title" hidden>
+  <div class="overlay-box">
+    <div id="overlay-spinner" class="spinner" aria-hidden="true"></div>
+    <h2 id="overlay-title"></h2>
+    <p id="overlay-text" class="muted"></p>
+    <div id="overlay-actions" class="row gap"></div>
+  </div>
 </div>
 
 <script src="/app.js"></script>

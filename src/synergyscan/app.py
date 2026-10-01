@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from . import config, db, logs, paths
+from . import config, db, lifecycle, logs, paths
 from .printer import LabelSize, PrintService
 from .printer.errors import PrinterError
 from .printer.service import Job
@@ -235,7 +235,7 @@ def _spec_for(con: sqlite3.Connection, body: PrintIn) -> tuple[LabelSpec, int | 
 # --------------------------------------------------------------------- meta
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": relver.current()}
+    return {"ok": True, "version": relver.current(), "boot": lifecycle.BOOT_ID}
 
 
 @app.get("/api/version")
@@ -248,6 +248,43 @@ def api_version(con: Db) -> dict:
         "channel_url": state.settings.channel_url,
         "auto_update": state.settings.auto_update,
     }
+
+
+# ------------------------------------------------------- restart and update
+@app.get("/api/update")
+def api_update_check() -> dict:
+    """Ask the update channel whether a newer release exists."""
+    return {**lifecycle.check_for_update(state.settings.channel_url),
+            "status": lifecycle.status()}
+
+
+@app.post("/api/update", status_code=202)
+def api_update_start() -> dict:
+    """Install the waiting update in the background, then restart into it.
+
+    A person pressing the button is the consent, so this ignores the
+    auto_update setting, which only governs the silent check at startup.
+    """
+    try:
+        lifecycle.start_update(state.settings.channel_url, state.settings.update_timeout_s)
+    except lifecycle.Unavailable as e:
+        raise HTTPException(409, str(e)) from e
+    return lifecycle.status()
+
+
+@app.get("/api/update/status")
+def api_update_status() -> dict:
+    return lifecycle.status()
+
+
+@app.post("/api/restart", status_code=202)
+def api_restart() -> dict:
+    """Stop cleanly; the launcher starts the app again. Also picks up updates."""
+    try:
+        lifecycle.request_restart()
+    except lifecycle.Unavailable as e:
+        raise HTTPException(409, str(e)) from e
+    return {"restarting": True}
 
 
 @app.get("/api/settings")

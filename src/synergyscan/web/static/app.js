@@ -787,9 +787,175 @@ async function refreshPrinter() {
 async function loadVersion() {
   try {
     const v = await api("/api/version");
-    el.version.textContent = v.source_checkout ? "dev build" : v.release;
+    el.version.textContent = v.source_checkout ? "dev build" : `v${v.release}`;
     el.version.title = `schema ${v.schema} · data in ${v.data_dir}`;
+    /* Restart and update only make sense in an installed copy: there is no
+       launcher to bring a source checkout back. */
+    if (v.source_checkout) {
+      for (const b of [$("#btn-restart"), $("#btn-check-update")]) {
+        b.disabled = true;
+        b.title = "Only available in an installed copy of SynergyScan";
+      }
+    } else {
+      installed = true;
+      checkForUpdates(false);
+      setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000);
+    }
   } catch { /* the pill is cosmetic */ }
+}
+
+/* ------------------------------------------------------- restart and update
+ * Both end the same way: the app stops, the launcher starts it again (running
+ * the new release if one was installed), and this page reloads once the app
+ * reports a different boot id. The overlay keeps anyone from scanning into a
+ * server that is about to disappear. */
+let installed = false;
+let updateInfo = null;
+
+function overlay({ title, text = "", spinner = false, actions = [] }) {
+  $("#overlay-title").textContent = title;
+  $("#overlay-text").textContent = text;
+  $("#overlay-spinner").hidden = !spinner;
+  const box = $("#overlay-actions");
+  box.innerHTML = "";
+  for (const a of actions) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = a.label;
+    if (a.primary) b.className = "primary";
+    b.addEventListener("click", a.onClick);
+    box.appendChild(b);
+  }
+  $("#overlay").hidden = false;
+  const first = box.querySelector("button");
+  if (first) first.focus();
+}
+
+function closeOverlay() {
+  $("#overlay").hidden = true;
+  refocus();
+}
+
+function confirmBox(title, text, okLabel) {
+  return new Promise((resolve) => {
+    overlay({
+      title, text,
+      actions: [
+        { label: okLabel, primary: true, onClick: () => { closeOverlay(); resolve(true); } },
+        { label: "Cancel", onClick: () => { closeOverlay(); resolve(false); } },
+      ],
+    });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function bootId() {
+  try { return (await api("/api/health")).boot; } catch { return null; }
+}
+
+/* Polls until a different process answers, then reloads into it. */
+async function waitForRestart(oldBoot, what) {
+  overlay({ title: `${what}…`, text: "This takes a few seconds. Please don't close this window.",
+            spinner: true });
+  const deadline = Date.now() + 4 * 60 * 1000;   // a first start after an update builds things
+  await sleep(1500);
+  while (Date.now() < deadline) {
+    const now = await bootId();
+    if (now && now !== oldBoot) { location.reload(); return; }
+    await sleep(1000);
+  }
+  overlay({
+    title: "SynergyScan is taking longer than expected",
+    text: "Try reloading in a minute. If it still does not come back, close this window " +
+          "and open SynergyScan from the desktop icon.",
+    actions: [{ label: "Reload", primary: true, onClick: () => location.reload() }],
+  });
+}
+
+async function restartApp() {
+  const ok = await confirmBox(
+    "Restart SynergyScan?",
+    "It will be unavailable for a few seconds. Your data is not affected. " +
+    "If an update is waiting it will be installed.", "Restart");
+  if (!ok) return;
+  const before = await bootId();
+  try {
+    await api("/api/restart", { method: "POST" });
+  } catch (e) {
+    say(e.message, "error", 8000);
+    return;
+  }
+  await waitForRestart(before, "Restarting");
+}
+
+async function checkForUpdates(manual) {
+  if (!installed) return;
+  const btn = $("#btn-check-update");
+  if (manual) { btn.disabled = true; btn.textContent = "Checking…"; }
+  try {
+    updateInfo = await api("/api/update");
+  } catch (e) {
+    if (manual) say(e.message, "error");
+    return;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Check for updates";
+  }
+  const u = updateInfo;
+  $("#update-bar").hidden = !(u.update_available && u.installable) || updateDismissed === u.latest;
+  btn.classList.toggle("attention", u.update_available);
+  if (u.update_available) {
+    $("#update-version").textContent = `(${u.latest})`;
+    $("#update-notes").textContent = u.notes ? `· ${u.notes}` : "";
+  }
+  if (manual) {
+    if (u.error) say(u.error, "error", 8000);
+    else if (u.update_available) { updateDismissed = null; $("#update-bar").hidden = false; }
+    else say(`You are up to date (version ${u.current}).`);
+  }
+}
+let updateDismissed = null;
+
+async function updateNow() {
+  const u = updateInfo;
+  const ok = await confirmBox(
+    `Update to ${u && u.latest ? u.latest : "the new version"}?`,
+    "SynergyScan downloads and checks the update, then restarts. This takes a minute " +
+    "or two and nobody can scan meanwhile. Your data is kept, and if anything goes " +
+    "wrong the current version stays installed.", "Update now");
+  if (!ok) return;
+  const before = await bootId();
+  try {
+    await api("/api/update", { method: "POST" });
+  } catch (e) {
+    say(e.message, "error", 8000);
+    return;
+  }
+  overlay({ title: "Updating SynergyScan…", text: "Downloading the update.", spinner: true });
+  for (;;) {
+    await sleep(1500);
+    let st;
+    try {
+      st = await api("/api/update/status");
+    } catch {
+      break;                                   // the app is already restarting
+    }
+    if (st.phase === "installing") {
+      overlay({ title: "Updating SynergyScan…", text: st.message, spinner: true });
+    } else if (st.phase === "restarting") {
+      break;
+    } else {
+      // failed or up to date: tell the person, keep the app as it was.
+      overlay({
+        title: st.phase === "failed" ? "The update did not install" : "Nothing to update",
+        text: st.message,
+        actions: [{ label: "Close", primary: true, onClick: closeOverlay }],
+      });
+      return;
+    }
+  }
+  await waitForRestart(before, "Restarting into the new version");
 }
 
 /* ------------------------------------------------------------------- wiring */
@@ -821,6 +987,13 @@ $("#btn-create").addEventListener("click", createItem);
 $("#btn-cancel-create").addEventListener("click", () => {
   el.newPanel.hidden = true;
   refocus();
+});
+$("#btn-restart").addEventListener("click", restartApp);
+$("#btn-check-update").addEventListener("click", () => checkForUpdates(true));
+$("#btn-update-now").addEventListener("click", updateNow);
+$("#btn-update-later").addEventListener("click", () => {
+  updateDismissed = updateInfo && updateInfo.latest;
+  $("#update-bar").hidden = true;
 });
 $("#btn-preview").addEventListener("click", preview);
 $("#btn-print").addEventListener("click", print);
