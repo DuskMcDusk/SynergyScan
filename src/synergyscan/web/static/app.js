@@ -18,7 +18,7 @@ const $ = (sel) => document.querySelector(sel);
 const el = {
   scan: $("#scan"),
   scanGo: $("#scan-go"),
-  banner: $("#banner"),
+  toasts: $("#toasts"),
   printerPill: $("#printer-pill"),
   version: $("#version"),
 
@@ -66,8 +66,6 @@ const el = {
   tileLow: $("#tile-low"),
   countReorder: $("#count-reorder"),
   countLow: $("#count-low"),
-  countItems: $("#count-items"),
-  countAreas: $("#count-areas"),
 
   areas: $("#areas tbody"),
   newAreaName: $("#new-area-name"),
@@ -81,7 +79,6 @@ const el = {
 };
 
 let currentItem = null;
-let bannerTimer = null;
 let areasCache = [];
 let categoriesCache = [];
 let locationsCache = [];
@@ -106,12 +103,27 @@ async function api(path, options = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+/* Toast in the bottom-right corner. It floats over the page, so it never
+   shifts the layout; it fades after `ms` or when the user clicks ×. */
 function say(text, kind = "info", ms = 4000) {
-  clearTimeout(bannerTimer);
-  el.banner.textContent = text;
-  el.banner.className = `banner ${kind}`;
-  el.banner.hidden = false;
-  if (ms) bannerTimer = setTimeout(() => { el.banner.hidden = true; }, ms);
+  const toast = document.createElement("div");
+  toast.className = `toast ${kind}`;
+  toast.setAttribute("role", kind === "error" ? "alert" : "status");
+  const msg = document.createElement("span");
+  msg.className = "toast-text";
+  msg.textContent = text;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss");
+  close.textContent = "×";
+  close.addEventListener("click", () => toast.remove());
+  toast.append(msg, close);
+  el.toasts.append(toast);
+  while (el.toasts.querySelectorAll(".toast").length > 4) {
+    el.toasts.querySelector(".toast").remove();
+  }
+  if (ms) setTimeout(() => toast.remove(), ms);
 }
 
 /* Focus must return to the scan field after every action, or the next scan
@@ -465,11 +477,8 @@ async function refreshStats() {
   try {
     allItems = await api("/api/items");
   } catch { return; }   // the tiles are a convenience; the list reports its own errors
-  el.countItems.textContent = allItems.length;
   el.countReorder.textContent = allItems.filter((i) => i.availability === "reorder").length;
   el.countLow.textContent = allItems.filter((i) => i.availability === "low").length;
-  el.countAreas.textContent =
-    `${areasCache.length} area${areasCache.length === 1 ? "" : "s"}`;
   renderNav();
   renderUnitOptions();
 }
@@ -513,15 +522,32 @@ function renderNav() {
                   !area && !cat);
   for (const a of areasCache) {
     const areaOn = String(a.id) === area && !cat;
-    html += link("", a.name, perArea.get(a.id) || 0,
-                 `data-area="${a.id}" data-category=""`, areaOn);
-    for (const c of categoriesCache.filter((x) => x.area_id === a.id)) {
+    const cats = categoriesCache.filter((x) => x.area_id === a.id);
+    const closed = collapsedAreas.has(a.id);
+    const chevron = cats.length
+      ? `<button type="button" class="nav-toggle${closed ? " closed" : ""}" ` +
+        `data-toggle-area="${a.id}" aria-expanded="${!closed}" ` +
+        `aria-label="${closed ? "Expand" : "Collapse"} ${escapeHtml(a.name)}"></button>`
+      : `<span class="nav-toggle-gap"></span>`;
+    html += `<div class="nav-area">${chevron}` +
+            link("", a.name, perArea.get(a.id) || 0,
+                 `data-area="${a.id}" data-category=""`, areaOn) + `</div>`;
+    if (closed) continue;
+    for (const c of cats) {
       html += link("sub", c.name, perCat.get(c.id) || 0,
                    `data-area="${a.id}" data-category="${c.id}"`, String(c.id) === cat);
     }
   }
   el.nav.innerHTML = html;
 }
+
+/* Areas the user has folded shut in the sidebar; remembered across reloads. */
+const collapsedAreas = new Set();
+try {
+  for (const id of JSON.parse(localStorage.getItem("collapsedAreas") || "[]")) {
+    collapsedAreas.add(id);
+  }
+} catch { /* storage unavailable: start expanded */ }
 
 async function createItem() {
   const body = {
@@ -991,10 +1017,12 @@ $("#btn-cancel-create").addEventListener("click", () => {
 $("#btn-restart").addEventListener("click", restartApp);
 $("#btn-check-update").addEventListener("click", () => checkForUpdates(true));
 $("#btn-update-now").addEventListener("click", updateNow);
-$("#btn-update-later").addEventListener("click", () => {
-  updateDismissed = updateInfo && updateInfo.latest;
-  $("#update-bar").hidden = true;
-});
+for (const id of ["#btn-update-later", "#btn-update-close"]) {
+  $(id).addEventListener("click", () => {
+    updateDismissed = updateInfo && updateInfo.latest;
+    $("#update-bar").hidden = true;
+  });
+}
 $("#btn-preview").addEventListener("click", preview);
 $("#btn-print").addEventListener("click", print);
 $("#btn-save-details").addEventListener("click", saveItemDetails);
@@ -1057,6 +1085,14 @@ el.locations.addEventListener("click", async (e) => {
 });
 
 el.nav.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-toggle-area]");
+  if (t) {
+    const id = Number(t.dataset.toggleArea);
+    if (!collapsedAreas.delete(id)) collapsedAreas.add(id);
+    try { localStorage.setItem("collapsedAreas", JSON.stringify([...collapsedAreas])); } catch {}
+    renderNav();
+    return;
+  }
   const a = e.target.closest("[data-area]");
   if (!a) return;
   e.preventDefault();

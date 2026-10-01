@@ -644,6 +644,11 @@ def app_js() -> FileResponse:
     return FileResponse(WEB / "static" / "app.js", media_type="text/javascript")
 
 
+@app.get("/logo.png")
+def logo_png() -> FileResponse:
+    return FileResponse(WEB / "static" / "logo.png", media_type="image/png")
+
+
 @app.get("/app.css")
 def app_css() -> FileResponse:
     return FileResponse(WEB / "static" / "app.css", media_type="text/css")

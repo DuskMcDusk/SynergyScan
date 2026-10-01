@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SynergyScan</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2072%2048%22%20fill%3D%22none%22%20stroke%3D%22%23FFCD00%22%20stroke-width%3D%226%22%3E%3Cpath%20d%3D%22M4%202V7M4%2013V14A20%2020%200%200%200%2044%2014V2%22%2F%3E%3Cpath%20d%3D%22M68%2046V41M68%2035V34A20%2020%200%200%200%2028%2034V46%22%2F%3E%3C%2Fsvg%3E">
+<link rel="icon" href="/logo.png" type="image/png">
 <meta name="theme-color" content="#231F20">
 <link rel="stylesheet" href="/app.css">
 </head>
@@ -14,8 +14,7 @@
 
 <aside class="sidebar">
   <h1 class="brand">
-    <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 48" fill="none" stroke="#FFCD00" stroke-width="6" aria-hidden="true"><path d="M4 2V7M4 13V14A20 20 0 0 0 44 14V2"/><path d="M68 46V41M68 35V34A20 20 0 0 0 28 34V46"/></svg>
-    <span class="brand-word" aria-label="Sinergy Flow"><span class="sinergy">SINERGY</span><span class="flow">FLOW</span></span>
+    <img class="brand-logo" src="/logo.png" alt="Sinergy Flow">
     <span class="brand-product">Scan</span>
   </h1>
   <nav class="mainnav" aria-label="Sections">
@@ -27,6 +26,7 @@
   </nav>
   <div class="side-foot">
     <span id="version" class="pill muted"></span>
+    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
     <div class="foot-actions">
       <button id="btn-check-update" type="button" class="side-btn">Check for updates</button>
       <button id="btn-restart" type="button" class="side-btn">Restart</button>
@@ -41,16 +41,6 @@
 
 <div class="content">
 
-<!-- Shown only when the update channel offers a newer release. -->
-<div id="update-bar" class="update-bar" hidden>
-  <div><strong>A new version is available</strong>
-    <span id="update-version"></span>
-    <span id="update-notes" class="muted"></span></div>
-  <div class="row gap">
-    <button id="btn-update-now" type="button" class="primary">Update now</button>
-    <button id="btn-update-later" type="button">Later</button>
-  </div>
-</div>
 
 <!-- The scan field is the app's front door: always present, always focused.
      A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
@@ -61,8 +51,6 @@
   <button id="scan-go" class="primary">Find</button>
   <button id="btn-new-item" type="button">+ Add</button>
 </section>
-
-<div id="banner" class="banner" hidden></div>
 
 <main>
 <div id="view-scan" class="view">
@@ -204,20 +192,10 @@
   <section class="tiles" aria-label="Summary">
   <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
     <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
-    <span class="pill bad">act now</span>
   </button>
   <button class="tile" id="tile-low" type="button" title="Show items that are running low">
     <span class="label">Low stock</span><span class="n" id="count-low">–</span>
-    <span class="pill warn">watch</span>
   </button>
-  <div class="tile">
-    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
-    <span class="muted small" id="count-areas"></span>
-  </div>
-  <div class="tile">
-    <span class="label">Printer</span>
-    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
-  </div>
 </section>
 
   <section class="card">
@@ -298,6 +276,21 @@
 </main>
 
 </div>
+</div>
+
+<!-- Notifications float bottom-right over the page and never move the layout. -->
+<div id="toasts" class="toasts" aria-live="polite">
+  <!-- Shown only when the update channel offers a newer release. -->
+  <div id="update-bar" class="update-bar" hidden>
+    <button id="btn-update-close" type="button" class="toast-close" aria-label="Dismiss">×</button>
+    <div><strong>A new version is available</strong>
+      <span id="update-version"></span>
+      <span id="update-notes" class="muted"></span></div>
+    <div class="row gap">
+      <button id="btn-update-now" type="button" class="primary">Update now</button>
+      <button id="btn-update-later" type="button">Later</button>
+    </div>
+  </div>
 </div>
 
 <!-- Blocks the screen while the app restarts or updates, and doubles as the

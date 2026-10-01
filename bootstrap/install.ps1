@@ -196,7 +196,7 @@ Step 'Installing the launcher and helper scripts'
 # means re-running this installer, which is a rare and deliberate act.
 $src = Join-Path $releaseDir 'bootstrap'
 foreach ($f in 'launcher.py', 'rollback.bat', 'rollback.ps1', 'uninstall.ps1',
-               'install.ps1', 'install.bat') {
+               'install.ps1', 'install.bat', 'synergyscan.ico') {
     $p = Join-Path $src $f
     if (Test-Path $p) { Copy-Item $p (Join-Path $InstallRoot $f) -Force }
 }
@@ -237,6 +237,8 @@ $desktop = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Deskt
 $desktop.TargetPath = $vbs
 $desktop.WorkingDirectory = $InstallRoot
 $desktop.Description = 'Open SynergyScan inventory'
+$icon = Join-Path $InstallRoot 'synergyscan.ico'
+if (Test-Path $icon) { $desktop.IconLocation = "$icon,0" }
 $desktop.Save()
 Good 'desktop shortcut'
 
@@ -248,6 +250,7 @@ if (-not $NoAutostart) {
     $auto = $shell.CreateShortcut((Join-Path $startup 'SynergyScan.lnk'))
     $auto.TargetPath = $vbs
     $auto.WorkingDirectory = $InstallRoot
+    if (Test-Path $icon) { $auto.IconLocation = "$icon,0" }
     $auto.Save()
     Good 'starts automatically when you log on'
 }

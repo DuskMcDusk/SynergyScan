@@ -95,6 +95,20 @@ body[data-view="stock"] #nav { display: block; }
                  text-transform: uppercase; padding: 12px 20px; }
 .nav-link.main.on { background: var(--brand-grey); border-left-color: var(--brand-yellow); color: #fff; }
 #nav .nav-link.on { background: #ffffff18; color: #fff; font-weight: 600; }
+.nav-area { display: flex; align-items: stretch; }
+.nav-area .nav-link { flex: 1; padding-left: 4px; }
+.nav-toggle, .nav-toggle-gap { flex: none; width: 24px; margin-left: 4px; }
+.nav-toggle {
+  background: transparent; border: 0; padding: 0; cursor: pointer; color: #ffffff99;
+  position: relative;
+}
+.nav-toggle::before {
+  content: ""; position: absolute; left: 8px; top: 50%; width: 6px; height: 6px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: translateY(-70%) rotate(45deg); transition: transform 0.15s;
+}
+.nav-toggle.closed::before { transform: translateY(-50%) rotate(-45deg); }
+.nav-toggle:hover { color: #fff; }
 .nav-link.sub { padding-left: 36px; font-size: 0.92rem; }
 .nav-link .count { color: #ffffff77; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .side-foot {
@@ -106,13 +120,9 @@ body[data-view="stock"] #nav { display: block; }
 
 .content { padding: 20px 24px 40px; min-width: 0; max-width: 1100px; width: 100%; }
 
-/* Logo: SINERGY in bold, FLOW in thin (the font "goes from Bold to Thin"),
-   with the infinity mark standing in for the O. */
+/* The logo artwork is dark on white, so it sits on a white tile in the dark sidebar. */
 .brand { display: flex; align-items: center; gap: 14px; }
-.brand-mark { height: 36px; width: auto; flex: none; }
-.brand-word { display: flex; flex-direction: column; line-height: 1; }
-.brand-word .sinergy { font-weight: 800; font-size: 1.25rem; letter-spacing: 0.04em; }
-.brand-word .flow { font-weight: 200; font-size: 1rem; letter-spacing: 0.5em; margin-top: 3px; }
+.brand-logo { height: 40px; width: auto; flex: none; background: #fff; border-radius: 4px; padding: 4px 8px; }
 .brand-product {
   font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em;
   color: var(--brand-yellow); padding-left: 14px; border-left: 1px solid #ffffff44;
@@ -206,9 +216,8 @@ button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(
 .foot-links { font-size: 0.8rem; }
 
 .update-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  margin: 0 0 16px; padding: 12px 16px; border-radius: var(--radius);
-  border: 1px solid var(--brand-yellow); border-left-width: 6px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  border-color: var(--brand-yellow); border-left-width: 6px;
   background: color-mix(in srgb, var(--brand-yellow) 18%, var(--surface));
 }
 
@@ -217,7 +226,7 @@ button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(
   align-items: center; justify-content: center; padding: 16px;
   background: color-mix(in srgb, var(--brand-off-black) 82%, transparent);
 }
-.overlay[hidden] { display: none; }
+.overlay[hidden], .update-bar[hidden] { display: none; }
 .overlay-box {
   width: min(460px, 100%); padding: 28px; text-align: center;
   background: var(--surface); border: 1px solid var(--border);
@@ -253,7 +262,6 @@ button.tile:hover { border-color: var(--text); border-top-color: var(--brand-yel
                letter-spacing: 0.12em; color: var(--muted); }
 .tile .n { font-family: var(--font-head); font-size: 2.2rem; line-height: 1.1;
            font-variant-numeric: tabular-nums; }
-.tile .n.small-n { font-size: 1rem; padding: 0.45rem 0; }
 
 .view > .card:last-child, .view > .tiles:last-child { margin-bottom: 0; }
 .table-scroll { overflow-x: auto; }
@@ -266,13 +274,27 @@ button.tile:hover { border-color: var(--text); border-top-color: var(--brand-yel
 .meter i.zero { background: var(--danger); }
 
 
-.banner {
-  margin: 0 0 16px;
-  padding: 12px 16px; border-radius: var(--radius);
-  border: 1px solid var(--border);
+/* Notifications: a fixed stack bottom-right, out of the page flow. The
+   container ignores clicks so it never blocks the UI beneath it. */
+.toasts {
+  position: fixed; right: 20px; bottom: 20px; z-index: 50;
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(380px, calc(100vw - 40px)); pointer-events: none;
 }
-.banner.info { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
-.banner.error { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.toast, .update-bar {
+  pointer-events: auto; position: relative; margin: 0;
+  padding: 12px 40px 12px 16px; border-radius: var(--radius);
+  border: 1px solid var(--border); box-shadow: 0 6px 20px #00000033;
+}
+.toast { display: flex; align-items: flex-start; }
+.toast.info { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.toast.error { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.toast-close {
+  position: absolute; top: 6px; right: 8px; width: 26px; height: 26px; padding: 0;
+  background: transparent; border: 0; color: inherit; font-size: 1.3rem; line-height: 1;
+  cursor: pointer; opacity: 0.7;
+}
+.toast-close:hover { opacity: 1; background: transparent; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 8px; text-align: left; border-bottom: 1px solid var(--border); }
