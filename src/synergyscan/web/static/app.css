@@ -1,37 +1,61 @@
-/* Sized for a warehouse, not a desk: large touch targets, high contrast, and
-   numbers readable at arm's length. Dark mode follows the OS because the
-   receiving bench and the office are rarely lit the same way. */
+/* Sinergy Flow brand (see Docs/brand.md). Yellow and grey only: yellow means
+   energy and is reserved for the primary action and focus; greys carry
+   everything else. Still sized for a warehouse, not a desk: large touch
+   targets, high contrast, numbers readable at arm's length. Dark mode follows
+   the OS because the receiving bench and the office are rarely lit the same
+   way.
+
+   Fonts: Conthrax SemiBold (headings) and Proxima Nova (body) are the brand
+   faces but are licensed, so they are used if installed on the machine and
+   otherwise fall back to close system faces. */
 
 :root {
-  --bg: #f6f7f9;
+  --brand-off-black: #231F20;
+  --brand-grey: #343232;
+  --brand-yellow: #FFCD00;
+  --brand-yellow-soft: #FFE787;
+
+  --bg: #f4f3f1;
   --surface: #ffffff;
-  --border: #d8dce3;
-  --text: #16191d;
-  --muted: #5d6673;
-  --accent: #1f5fd0;
+  --border: #d9d6d2;
+  --text: #231F20;
+  --muted: #625d5a;
+  --accent: #FFCD00;          /* fills and borders only: too light for text on white */
+  --accent-soft: #FFE787;
+  --on-accent: #231F20;       /* text on yellow, always off-black */
+  --focus: #231F20;
+  --header-bg: #231F20;
+  --header-text: #ffffff;
   --ok: #17724a;
   --ok-bg: #e6f5ec;
   --warn: #8a4b12;
   --warn-bg: #fdf0e3;
   --danger: #a11d2c;
   --danger-bg: #fdeaec;
-  --radius: 10px;
+  --radius: 6px;
+
+  --font-head: "Conthrax SB", "Conthrax", "Eurostile", "Bank Gothic", "Segoe UI Semibold",
+               system-ui, sans-serif;
+  --font-body: "Proxima Nova", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #14171b;
-    --surface: #1c2025;
-    --border: #2f3641;
-    --text: #e9edf2;
-    --muted: #9aa5b3;
-    --accent: #6ea2ff;
+    --bg: #231F20;
+    --surface: #343232;
+    --border: #4a4747;
+    --text: #f3f1ee;
+    --muted: #b3aeaa;
+    --accent: #FFCD00;
+    --accent-soft: #FFE787;
+    --focus: #FFCD00;
+    --header-bg: #1a1718;
     --ok: #6bd39b;
-    --ok-bg: #16301f;
+    --ok-bg: #1d3326;
     --warn: #e0a869;
-    --warn-bg: #33250f;
+    --warn-bg: #3a2a14;
     --danger: #ff8b96;
-    --danger-bg: #3a161c;
+    --danger-bg: #42191f;
   }
 }
 
@@ -41,18 +65,33 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.5 var(--font-body);
 }
+
+h1, h2, h3, th, .qty { font-family: var(--font-head); }
 
 header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
   padding: 12px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  color: var(--header-text);
+  border-bottom: 4px solid var(--brand-yellow);
 }
-header h1 { font-size: 1.15rem; margin: 0; letter-spacing: -0.01em; }
+header h1 { margin: 0; }
 header .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Logo: SINERGY in bold, FLOW in thin (the font "goes from Bold to Thin"),
+   with the infinity mark standing in for the O. */
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark { height: 36px; width: auto; flex: none; }
+.brand-word { display: flex; flex-direction: column; line-height: 1; }
+.brand-word .sinergy { font-weight: 800; font-size: 1.25rem; letter-spacing: 0.04em; }
+.brand-word .flow { font-weight: 200; font-size: 1rem; letter-spacing: 0.5em; margin-top: 3px; }
+.brand-product {
+  font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--brand-yellow); padding-left: 14px; border-left: 1px solid #ffffff44;
+}
 
 main { max-width: 1000px; margin: 0 auto; padding: 16px; }
 footer {
@@ -60,6 +99,8 @@ footer {
   color: var(--muted); font-size: 0.85rem;
 }
 footer a { color: var(--muted); }
+footer a:hover { color: var(--text); }
+.footer-mark { display: block; height: 22px; margin-bottom: 10px; opacity: 0.9; }
 
 /* ---------------------------------------------------------------- scan bar */
 #scanbar {
@@ -70,23 +111,24 @@ footer a { color: var(--muted); }
   flex: 1; min-width: 0;
   padding: 14px 16px;
   font-size: 1.15rem;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--brand-yellow);
   border-radius: var(--radius);
   background: var(--surface); color: var(--text);
 }
-#scan:focus { outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+#scan:focus { outline: 3px solid color-mix(in srgb, var(--brand-yellow) 55%, transparent); outline-offset: 1px; }
 
 /* ----------------------------------------------------------------- pieces */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--brand-yellow);
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 16px;
 }
-.card h2 { margin: 0 0 2px; font-size: 1.25rem; }
-.card h3 { margin: 20px 0 6px; font-size: 0.95rem; color: var(--muted);
-           text-transform: uppercase; letter-spacing: 0.04em; }
+.card h2 { margin: 0 0 2px; font-size: 1.15rem; letter-spacing: 0.02em; }
+.card h3 { margin: 20px 0 6px; font-size: 0.8rem; color: var(--muted);
+           text-transform: uppercase; letter-spacing: 0.1em; }
 
 .row { display: flex; align-items: flex-end; gap: 12px; }
 .row.between { justify-content: space-between; align-items: flex-start; }
@@ -97,27 +139,35 @@ footer a { color: var(--muted); }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: 0.8rem; color: var(--muted); }
 input, select {
-  padding: 10px 12px; font-size: 1rem;
-  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: 1rem; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface); color: var(--text);
+}
+input:focus, select:focus, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px;
 }
 input[type="number"] { width: 110px; }
 .checkbox { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+input[type="checkbox"] { accent-color: var(--brand-yellow); }
 
 button {
-  padding: 11px 16px; font-size: 1rem; font-weight: 550;
-  border: 1px solid var(--border); border-radius: 8px;
+  padding: 11px 16px; font-size: 1rem; font-weight: 600; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface); color: var(--text);
   cursor: pointer;
 }
-button:hover { border-color: var(--accent); }
+button:hover { border-color: var(--text); }
 button:disabled { opacity: 0.5; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary {
+  background: var(--brand-yellow); border-color: var(--brand-yellow);
+  color: var(--on-accent);
+}
+button.primary:hover { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-soft); }
 button.ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
 button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 
 .qty-block { text-align: right; }
-.qty { font-size: 2.4rem; font-weight: 650; line-height: 1;
+.qty { font-size: 2.4rem; font-weight: 600; line-height: 1;
        font-variant-numeric: tabular-nums; }
 
 .pill {
@@ -125,7 +175,10 @@ button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(
   border: 1px solid var(--border); border-radius: 999px;
   font-size: 0.8rem; background: var(--bg);
 }
+header .pill { background: transparent; border-color: #ffffff55; color: var(--header-text); }
+header .pill.muted { color: #ffffffb3; }
 .pill.good { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.pill.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 .pill.bad  { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
 .pill.muted { color: var(--muted); }
 
@@ -139,18 +192,19 @@ button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(
 
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 8px; text-align: left; border-bottom: 1px solid var(--border); }
-th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em;
+th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em;
      color: var(--muted); font-weight: 600; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.low td { background: var(--warn-bg); }
+tr.reorder td { background: var(--danger-bg); }
 table.compact td { padding: 6px 8px; font-size: 0.9rem; }
 tbody tr:last-child td { border-bottom: none; }
 
 .labels { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
-.labels summary { cursor: pointer; font-weight: 550; }
+.labels summary { cursor: pointer; font-weight: 600; }
 #preview {
   margin-top: 12px; display: block;
-  border: 1px solid var(--border); border-radius: 6px;
+  border: 1px solid var(--border); border-radius: 4px;
   background: #fff;                 /* a label is white paper in either theme */
   image-rendering: pixelated;       /* 203 dpi bars must not be smoothed away */
   max-width: 100%;
@@ -168,4 +222,5 @@ code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
 @media (max-width: 600px) {
   .row.between { flex-direction: column; }
   .qty-block { text-align: left; }
+  .brand-product { display: none; }
 }
