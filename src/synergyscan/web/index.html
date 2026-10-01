@@ -10,17 +10,26 @@
 </head>
 <body>
 
-<header>
+<div class="app">
+
+<aside class="sidebar">
   <h1 class="brand">
     <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 48" fill="none" stroke="#FFCD00" stroke-width="6" aria-hidden="true"><path d="M4 2V7M4 13V14A20 20 0 0 0 44 14V2"/><path d="M68 46V41M68 35V34A20 20 0 0 0 28 34V46"/></svg>
     <span class="brand-word" aria-label="Sinergy Flow"><span class="sinergy">SINERGY</span><span class="flow">FLOW</span></span>
     <span class="brand-product">Scan</span>
   </h1>
-  <div class="meta">
-    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
+  <nav id="nav" aria-label="Areas and categories"></nav>
+  <div class="nav-title">Setup</div>
+  <a class="nav-link" href="#setup" id="nav-setup">Areas, categories &amp; locations</a>
+  <div class="side-foot">
     <span id="version" class="pill muted"></span>
+    <a href="/api/doctor" target="_blank">Diagnostics</a> ·
+    <a href="/api/logs" target="_blank">Log</a> ·
+    <a href="/api/docs" target="_blank">API</a>
   </div>
-</header>
+</aside>
+
+<div class="content">
 
 <!-- The scan field is the app's front door: always present, always focused.
      A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
@@ -32,6 +41,25 @@
 </section>
 
 <div id="banner" class="banner" hidden></div>
+
+<section class="tiles" aria-label="Summary">
+  <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
+    <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
+    <span class="pill bad">act now</span>
+  </button>
+  <button class="tile" id="tile-low" type="button" title="Show items that are running low">
+    <span class="label">Low stock</span><span class="n" id="count-low">–</span>
+    <span class="pill warn">watch</span>
+  </button>
+  <div class="tile">
+    <span class="label">Items tracked</span><span class="n" id="count-items">–</span>
+    <span class="muted small" id="count-areas"></span>
+  </div>
+  <div class="tile">
+    <span class="label">Printer</span>
+    <span class="n small-n"><span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span></span>
+  </div>
+</section>
 
 <main>
   <!-- Shown when a scan resolves to an item -->
@@ -161,9 +189,30 @@
     </div>
   </section>
 
+  <section class="card">
+    <div class="row between wrap">
+      <h2>Stock</h2>
+      <div class="row gap wrap">
+        <input id="search" type="search" placeholder="Search name, SKU or barcode">
+        <select id="filter-area"><option value="">All areas</option></select>
+        <select id="filter-category"><option value="">All categories</option></select>
+        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
+      </div>
+    </div>
+    <div class="table-scroll">
+    <table id="items">
+      <thead><tr>
+        <th>Name</th><th>SKU</th><th>Category</th><th>Location</th><th>Level</th>
+        <th class="num">On hand</th><th class="num">Reorder at</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
+  </section>
   <!-- Setup: the Area -> Category -> Item hierarchy and physical Locations
        are all user-managed here, not fixed in the code. -->
-  <section class="card">
+  <section class="card" id="setup">
     <h2>Areas, categories &amp; locations</h2>
     <details class="labels" open>
       <summary>Areas</summary>
@@ -212,32 +261,10 @@
     </details>
   </section>
 
-  <section class="card">
-    <div class="row between wrap">
-      <h2>Stock</h2>
-      <div class="row gap">
-        <input id="search" type="search" placeholder="Search name, SKU or barcode">
-        <select id="filter-area"><option value="">All areas</option></select>
-        <select id="filter-category"><option value="">All categories</option></select>
-        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
-      </div>
-    </div>
-    <table id="items">
-      <thead><tr>
-        <th>Name</th><th>SKU</th><th>Category</th><th class="num">On hand</th>
-        <th class="num">Reorder at</th><th></th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
-  </section>
 </main>
 
-<footer>
-  <a href="/api/doctor" target="_blank">Diagnostics report</a> ·
-  <a href="/api/logs" target="_blank">Log</a> ·
-  <a href="/api/docs" target="_blank">API</a>
-</footer>
+</div>
+</div>
 
 <script src="/app.js"></script>
 </body>

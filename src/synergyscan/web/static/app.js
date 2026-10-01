@@ -60,6 +60,14 @@ const el = {
   filterArea: $("#filter-area"),
   filterCategory: $("#filter-category"),
 
+  nav: $("#nav"),
+  tileReorder: $("#tile-reorder"),
+  tileLow: $("#tile-low"),
+  countReorder: $("#count-reorder"),
+  countLow: $("#count-low"),
+  countItems: $("#count-items"),
+  countAreas: $("#count-areas"),
+
   areas: $("#areas tbody"),
   newAreaName: $("#new-area-name"),
   categories: $("#categories tbody"),
@@ -76,6 +84,8 @@ let bannerTimer = null;
 let areasCache = [];
 let categoriesCache = [];
 let locationsCache = [];
+let availFilter = "";  // "", "reorder" or "low": set by the summary tiles
+let allItems = [];   // unfiltered list: feeds the sidebar counts and the summary tiles
 
 /* ------------------------------------------------------------------ helpers */
 async function api(path, options = {}) {
@@ -358,6 +368,10 @@ async function loadItems() {
     say(e.message, "error");
     return;
   }
+  refreshStats();
+  if (availFilter) list = list.filter((it) => it.availability === availFilter);
+  el.tileReorder.classList.toggle("on", availFilter === "reorder");
+  el.tileLow.classList.toggle("on", availFilter === "low");
   el.items.innerHTML = "";
   el.itemsEmpty.hidden = list.length > 0;
   for (const it of list) {
@@ -366,14 +380,71 @@ async function loadItems() {
       tr.className = it.availability;
     }
     const cat = categoriesCache.find((c) => c.id === it.category_id);
+    const loc = locationsCache.find((l) => l.id === it.location_id);
     tr.innerHTML =
       `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.sku)}</td>` +
       `<td class="muted">${cat ? escapeHtml(cat.name) : ""}</td>` +
+      `<td class="muted">${loc ? escapeHtml(loc.code) : ""}</td>` +
+      `<td>${levelMeter(it)}</td>` +
       `<td class="num">${fmt(it.qty)} ${escapeHtml(it.unit)}</td>` +
       `<td class="num muted">${fmt(it.min_qty)}</td>` +
       `<td><button data-open="${it.item_id}">Open</button></td>`;
     el.items.appendChild(tr);
   }
+}
+
+/* A bar for how far above the reorder point an item is: full at twice the
+   reorder level or more. Items with no reorder level set show as full. */
+function levelMeter(it) {
+  const pct = it.min_qty > 0
+    ? Math.max(3, Math.min(100, (it.qty / (it.min_qty * 2)) * 100))
+    : 100;
+  const cls = it.availability === "reorder" ? "zero" : it.availability === "low" ? "lo" : "";
+  return `<span class="meter" aria-hidden="true"><i class="${cls}" style="width:${pct}%"></i></span>`;
+}
+
+/* ------------------------------------------------- sidebar tree & summary tiles */
+async function refreshStats() {
+  try {
+    allItems = await api("/api/items");
+  } catch { return; }   // the tiles are a convenience; the list reports its own errors
+  el.countItems.textContent = allItems.length;
+  el.countReorder.textContent = allItems.filter((i) => i.availability === "reorder").length;
+  el.countLow.textContent = allItems.filter((i) => i.availability === "low").length;
+  el.countAreas.textContent =
+    `${areasCache.length} area${areasCache.length === 1 ? "" : "s"}`;
+  renderNav();
+}
+
+/* Area > Category tree. Each link just sets the two filter selects, so the
+   selects remain the single source of truth for what the list shows. */
+function renderNav() {
+  const catArea = new Map(categoriesCache.map((c) => [c.id, c.area_id]));
+  const perCat = new Map();
+  const perArea = new Map();
+  for (const it of allItems) {
+    if (it.category_id == null) continue;
+    perCat.set(it.category_id, (perCat.get(it.category_id) || 0) + 1);
+    const a = catArea.get(it.category_id);
+    perArea.set(a, (perArea.get(a) || 0) + 1);
+  }
+  const area = el.filterArea.value;
+  const cat = el.filterCategory.value;
+  const link = (cls, label, count, attrs, on) =>
+    `<a href="#" class="nav-link ${cls}${on ? " on" : ""}" ${attrs}>` +
+    `<span>${escapeHtml(label)}</span><span class="count">${count}</span></a>`;
+  let html = link("", "All stock", allItems.length, 'data-area="" data-category=""',
+                  !area && !cat);
+  for (const a of areasCache) {
+    const areaOn = String(a.id) === area && !cat;
+    html += link("", a.name, perArea.get(a.id) || 0,
+                 `data-area="${a.id}" data-category=""`, areaOn);
+    for (const c of categoriesCache.filter((x) => x.area_id === a.id)) {
+      html += link("sub", c.name, perCat.get(c.id) || 0,
+                   `data-area="${a.id}" data-category="${c.id}"`, String(c.id) === cat);
+    }
+  }
+  el.nav.innerHTML = html;
 }
 
 async function createItem() {
@@ -426,6 +497,7 @@ async function loadAreas() {
   }
   fillSelect(el.newCategoryArea, areasCache, "(choose an area)");
   fillSelect(el.filterArea, areasCache, "All areas");
+  renderNav();
 }
 
 function areaName(areaId) {
@@ -455,6 +527,7 @@ async function loadCategories() {
   fillSelect(el.newCategory, categoriesCache, "—", label);
   fillSelect(el.editCategory, categoriesCache, "—", label);
   fillSelect(el.filterCategory, categoriesCache, "All categories", label);
+  renderNav();
 }
 
 async function loadLocations() {
@@ -717,6 +790,30 @@ el.locations.addEventListener("click", async (e) => {
     await api(`/api/locations/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
     await loadLocations();
   } catch (err) { say(err.message, "error"); }
+});
+
+el.nav.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-area]");
+  if (!a) return;
+  e.preventDefault();
+  el.filterArea.value = a.dataset.area;
+  el.filterCategory.value = a.dataset.category;
+  loadItems();
+  refocus();
+});
+
+/* The tiles toggle a filter on availability; clicking the active one clears it. */
+for (const [tile, which] of [[el.tileReorder, "reorder"], [el.tileLow, "low"]]) {
+  tile.addEventListener("click", () => {
+    availFilter = availFilter === which ? "" : which;
+    loadItems();
+    refocus();
+  });
+}
+
+$("#nav-setup").addEventListener("click", (e) => {
+  e.preventDefault();
+  $("#setup").scrollIntoView({ behavior: "smooth" });
 });
 
 let searchTimer = null;
