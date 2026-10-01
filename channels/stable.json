@@ -1,6 +1,6 @@
 {
-  "version": "2026.10.01-1",
-  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.10.01-1/synergyscan-2026.10.01-1.zip",
-  "sha256": "06c49323ed307a152a5d426406820b91b492610c82e5d1783bbdc39598df9c0f",
-  "notes": "updates and new UI"
+  "version": "2026.10.01-2",
+  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.10.01-2/synergyscan-2026.10.01-2.zip",
+  "sha256": "15dc54b3fe5b49b98818f8acc3e15268641ce6d382fa36e71b39e2fb814e4175",
+  "notes": "added update restart actions"
 }
