@@ -64,8 +64,8 @@ def schema_version(con: sqlite3.Connection) -> int:
 
 
 # ------------------------------------------------------------------- items
-ITEM_MASTER_FIELDS = ("category_id", "location_id", "specification", "supplier",
-                     "lead_time_days", "low_qty")
+ITEM_MASTER_FIELDS = ("category_id", "location_id", "supplier", "lead_time_days",
+                     "low_qty")
 
 
 def _check_thresholds(min_qty: float | None, low_qty: float | None) -> None:
@@ -85,12 +85,12 @@ def create_item(con: sqlite3.Connection, sku: str, name: str, **kw: Any) -> int:
     _check_thresholds(kw.get("min_qty", 0), kw.get("low_qty"))
     cur = con.execute(
         "INSERT INTO items (sku, name, description, unit, min_qty, barcode, "
-        "category_id, location_id, specification, supplier, lead_time_days, "
-        "low_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "category_id, location_id, supplier, lead_time_days, "
+        "low_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (sku.strip(), name.strip(), kw.get("description"), kw.get("unit", "pcs"),
          kw.get("min_qty", 0), (kw.get("barcode") or None),
-         kw.get("category_id"), kw.get("location_id"), kw.get("specification"),
-         kw.get("supplier"), kw.get("lead_time_days"), kw.get("low_qty")),
+         kw.get("category_id"), kw.get("location_id"), kw.get("supplier"),
+         kw.get("lead_time_days"), kw.get("low_qty")),
     )
     return int(cur.lastrowid)
 
@@ -136,7 +136,7 @@ def list_items(con: sqlite3.Connection, search: str | None = None,
                low_only: bool = False, limit: int = 500,
                category_id: int | None = None,
                area_id: int | None = None) -> list[sqlite3.Row]:
-    sql = [("SELECT s.*, i.barcode, i.specification, i.supplier, i.lead_time_days "
+    sql = [("SELECT s.*, i.barcode, i.supplier, i.lead_time_days "
            "FROM stock_on_hand s JOIN items i ON i.id = s.item_id")]
     if area_id is not None:
         sql.append("LEFT JOIN categories c ON c.id = s.category_id")

@@ -88,11 +88,11 @@ def test_item_response_includes_the_new_master_fields_and_availability(client):
                            json={"area_id": area["id"], "name": "Electrodes"}).json()
     item = client.post("/api/items", json={
         "sku": "FOAM-001", "name": "Fe foam", "category_id": category["id"],
-        "specification": "60 ppi", "supplier": "Supplier A", "lead_time_days": 30,
-        "min_qty": 5, "low_qty": 8,
+        "supplier": "Supplier A", "lead_time_days": 30, "min_qty": 5,
+        "low_qty": 8,
     }).json()
     assert item["category_id"] == category["id"]
-    assert item["specification"] == "60 ppi"
+    assert item["supplier"] == "Supplier A"
 
     full = client.get(f"/api/items/{item['id']}").json()
     assert full["availability"] == "reorder"       # qty 0, min_qty 5

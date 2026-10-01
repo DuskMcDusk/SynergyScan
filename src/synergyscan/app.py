@@ -110,7 +110,6 @@ class ItemIn(BaseModel):
     barcode: str | None = None
     category_id: int | None = None
     location_id: int | None = None
-    specification: str | None = None
     supplier: str | None = None
     lead_time_days: int | None = None
     low_qty: float | None = None
@@ -125,7 +124,6 @@ class ItemPatch(BaseModel):
     archived: bool | None = None
     category_id: int | None = None
     location_id: int | None = None
-    specification: str | None = None
     supplier: str | None = None
     lead_time_days: int | None = None
     low_qty: float | None = None

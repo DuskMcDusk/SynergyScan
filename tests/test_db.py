@@ -109,13 +109,12 @@ def test_create_item_accepts_the_new_master_fields(con):
     location = db.create_location(con, "D1", "Shelf D1")
     item_id = db.create_item(
         con, sku="FOAM-001", name="Fe foam", category_id=category,
-        location_id=location, specification="60 ppi, 3 mm", supplier="Supplier A",
-        lead_time_days=30, min_qty=5, low_qty=8,
+        location_id=location, supplier="Supplier A", lead_time_days=30,
+        min_qty=5, low_qty=8,
     )
     row = db.get_item(con, item_id)
     assert row["category_id"] == category
     assert row["location_id"] == location
-    assert row["specification"] == "60 ppi, 3 mm"
     assert row["supplier"] == "Supplier A"
     assert row["lead_time_days"] == 30
     assert row["low_qty"] == 8
@@ -125,7 +124,6 @@ def test_create_item_leaves_new_fields_null_by_default(con, item):
     row = db.get_item(con, item)
     assert row["category_id"] is None
     assert row["location_id"] is None
-    assert row["specification"] is None
     assert row["supplier"] is None
     assert row["lead_time_days"] is None
     assert row["low_qty"] is None
@@ -347,12 +345,11 @@ def test_list_items_exposes_the_new_item_master_columns(con):
     location = db.create_location(con, "D1", "Shelf D1")
     db.create_item(con, sku="FOAM-001", name="Fe foam", category_id=category,
                    location_id=location, low_qty=8, min_qty=5,
-                   specification="60 ppi", supplier="Supplier A", lead_time_days=30)
+                   supplier="Supplier A", lead_time_days=30)
     row = db.list_items(con)[0]
     assert row["category_id"] == category
     assert row["location_id"] == location
     assert row["low_qty"] == 8
-    assert row["specification"] == "60 ppi"
     assert row["supplier"] == "Supplier A"
     assert row["lead_time_days"] == 30
 

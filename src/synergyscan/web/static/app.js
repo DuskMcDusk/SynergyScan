@@ -34,7 +34,6 @@ const el = {
 
   editCategory: $("#edit-category"),
   editLocation: $("#edit-location"),
-  editSpecification: $("#edit-specification"),
   editSupplier: $("#edit-supplier"),
   editLeadTime: $("#edit-lead-time"),
   editLowQty: $("#edit-low-qty"),
@@ -199,7 +198,6 @@ function setAvailability(a) {
 function fillItemDetailForm(item) {
   el.editCategory.value = item.category_id ?? "";
   el.editLocation.value = item.location_id ?? "";
-  el.editSpecification.value = item.specification || "";
   el.editSupplier.value = item.supplier || "";
   el.editLeadTime.value = item.lead_time_days ?? "";
   el.editLowQty.value = item.low_qty ?? "";
@@ -307,7 +305,6 @@ async function saveItemDetails() {
   const body = {
     category_id: el.editCategory.value ? parseInt(el.editCategory.value, 10) : null,
     location_id: el.editLocation.value ? parseInt(el.editLocation.value, 10) : null,
-    specification: el.editSpecification.value.trim() || null,
     supplier: el.editSupplier.value.trim() || null,
     lead_time_days: el.editLeadTime.value ? parseInt(el.editLeadTime.value, 10) : null,
     low_qty: el.editLowQty.value ? parseFloat(el.editLowQty.value) : null,
