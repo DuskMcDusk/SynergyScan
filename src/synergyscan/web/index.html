@@ -26,15 +26,17 @@
     <a href="#archive" class="nav-link main" data-view="archive"><span>Archive</span></a>
   </nav>
   <div class="side-foot">
-    <span id="version" class="pill muted"></span>
-    <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
+    <div class="status-lines">
+      <span id="printer-pill" class="pill" title="Printer status">Printer: checking…</span>
+      <span id="version" class="pill muted"></span>
+    </div>
     <div class="foot-actions">
       <button id="btn-check-update" type="button" class="side-btn">Check for updates</button>
       <button id="btn-restart" type="button" class="side-btn">Restart</button>
     </div>
     <div class="foot-links">
-      <a href="/api/doctor" target="_blank">Diagnostics</a> ·
-      <a href="/api/logs" target="_blank">Log</a> ·
+      <a href="/api/doctor" target="_blank">Diagnostics</a>
+      <a href="/api/logs" target="_blank">Log</a>
       <a href="/api/docs" target="_blank">API</a>
     </div>
   </div>
@@ -42,130 +44,181 @@
 
 <div class="content">
 
-
 <!-- The scan field is the app's front door: always present, always focused.
-     A USB scanner is a keyboard, so a scan arrives here as typed text + Enter. -->
+     A USB scanner is a keyboard, so a scan arrives here as typed text + Enter.
+     On the Scan screen it is drawn as a viewfinder whose corners light up only
+     while it has focus, so it is obvious whether a scan will land. -->
 <section id="scanbar">
-  <label for="scan" class="sr-only">Scan or type a code</label>
-  <input id="scan" type="text" autocomplete="off" autocapitalize="off"
-         spellcheck="false" placeholder="Scan a barcode…">
-  <p class="scan-hint muted">Scan a label, or type a SKU and press Enter ·
-    <button id="btn-new-item" type="button" class="linkish">add a new item</button></p>
+  <div class="reticle">
+    <label for="scan" class="sr-only">Scan or type a code</label>
+    <input id="scan" type="text" autocomplete="off" autocapitalize="off"
+           spellcheck="false" placeholder="Scan a barcode">
+  </div>
+  <p class="scan-hint">
+    <span class="when-ready">Ready: scan a label, or type a SKU and press Enter.</span>
+    <span class="when-idle">Click here before scanning.</span>
+    <button id="btn-new-item" type="button" class="linkish">Add a new item</button>
+  </p>
 </section>
 
 <main>
 <div id="view-scan" class="view">
   <!-- Shown when a scan resolves to an item -->
-  <section id="item-panel" class="card" hidden>
+  <section id="item-panel" class="panel panel-focus" hidden>
     <div class="item-top">
-      <div>
-        <div id="item-where" class="label"></div>
+      <div class="item-id">
+        <p id="item-where" class="crumbs"></p>
         <h2 id="item-name">—</h2>
-        <span id="item-availability" class="pill"></span>
-        <span class="muted"><span id="item-sku"></span> · <span id="item-unit"></span><span id="item-lot"></span></span>
+        <dl class="meta">
+          <div><dt>SKU</dt><dd id="item-sku"></dd></div>
+          <div id="item-shelf-row"><dt>Shelf</dt><dd id="item-shelf"></dd></div>
+          <div id="item-lot-row"><dt>Lot</dt><dd id="item-lot"></dd></div>
+        </dl>
       </div>
       <div class="qty-block">
         <div id="item-qty" class="qty">0</div>
-        <div class="label">on hand</div>
+        <div class="qty-caption"><span id="item-unit"></span> on hand</div>
+        <span id="item-availability" class="pill"></span>
       </div>
     </div>
 
-    <div class="stepper">
-      <button type="button" class="step" data-step="-1" aria-label="One less">−</button>
-      <input id="move-qty" type="number" step="any" min="0" value="1" aria-label="Quantity">
-      <button type="button" class="step" data-step="1" aria-label="One more">+</button>
-    </div>
-    <div class="actions">
-      <button class="ok" data-reason="receive">Receive <span class="n">1</span> in</button>
-      <button class="warn" data-reason="issue">Issue <span class="n">1</span> out</button>
+    <div class="book">
+      <div class="stepper" role="group" aria-label="Quantity to book">
+        <button type="button" class="step" data-step="-1" aria-label="One less">−</button>
+        <input id="move-qty" type="number" step="any" min="0" value="1" aria-label="Quantity">
+        <button type="button" class="step" data-step="1" aria-label="One more">+</button>
+      </div>
+      <div class="actions">
+        <button class="ok" data-reason="receive">Receive <span class="n">1</span> in</button>
+        <button class="warn" data-reason="issue">Issue <span class="n">1</span> out</button>
+      </div>
     </div>
   </section>
 
-  <!-- Shown when a scan matches nothing -->
   <!-- Shown when a scan matches an archived item: bring it back, don't duplicate it. -->
-  <section id="archived-hit" class="card" hidden>
+  <section id="archived-hit" class="panel panel-focus" hidden>
     <h2>This item is archived</h2>
-    <p><strong id="archived-hit-name"></strong> <span class="muted" id="archived-hit-sku"></span>
-      was archived. Restore it to use it again.</p>
-    <div class="row gap">
+    <p><strong id="archived-hit-name"></strong> (<span id="archived-hit-sku"></span>)
+      is hidden from stock and scanning. Restore it to use it again.</p>
+    <div class="form-actions">
       <button id="btn-hit-restore" class="primary">Restore item</button>
       <button id="btn-hit-cancel">Cancel</button>
     </div>
   </section>
 
-  <section id="new-item-panel" class="card" hidden>
-    <h2 id="new-title">Not in the system yet</h2>
-    <p id="new-lead">Nothing matches <code id="unknown-code"></code>. Add it?</p>
-    <div class="row wrap gap">
-      <div class="field grow">
-        <label for="new-name">Name</label>
-        <input id="new-name" type="text" placeholder="e.g. Fe foam, 60 ppi, 3 mm">
+  <!-- Shown when a scan matches nothing; also the edit form for an item. -->
+  <section id="new-item-panel" class="panel panel-focus item-form" hidden>
+    <header class="form-head">
+      <h2 id="new-title">Not in the system yet</h2>
+      <p id="new-lead">Nothing matches <code id="unknown-code"></code>. Add it below.</p>
+    </header>
+
+    <fieldset class="group">
+      <legend>What it is</legend>
+      <div class="grid g-what">
+        <div class="field">
+          <label for="new-name">Name</label>
+          <input id="new-name" type="text" placeholder="e.g. Fe foam, 60 ppi, 3 mm">
+        </div>
+        <div class="field">
+          <label for="new-sku">SKU</label>
+          <input id="new-sku" type="text" placeholder="Generated">
+        </div>
+        <div class="field">
+          <label for="new-unit">Unit</label>
+          <input id="new-unit" type="text" value="pcs" list="unit-options" autocomplete="off">
+          <datalist id="unit-options"></datalist>
+        </div>
       </div>
-      <div class="field">
-        <label for="new-sku">SKU</label>
-        <input id="new-sku" type="text" placeholder="auto">
+    </fieldset>
+
+    <fieldset class="group">
+      <legend>Where it's kept</legend>
+      <div class="grid g-where">
+        <div class="field">
+          <label for="new-area">Area</label>
+          <select id="new-area"><option value="">—</option></select>
+        </div>
+        <span class="cascade" aria-hidden="true">›</span>
+        <div class="field">
+          <label for="new-category">Category</label>
+          <select id="new-category"><option value="">—</option></select>
+        </div>
+        <span class="cascade" aria-hidden="true">›</span>
+        <div class="field">
+          <label for="new-location">Shelf</label>
+          <select id="new-location"><option value="">—</option></select>
+        </div>
       </div>
-      <div class="field">
-        <label for="new-unit">Unit</label>
-        <input id="new-unit" type="text" value="pcs" list="unit-options" autocomplete="off">
-        <datalist id="unit-options"></datalist>
-      </div>
-      <div class="field">
-        <label for="new-min">Reorder at</label>
-        <input id="new-min" type="number" step="any" min="0" value="0">
-      </div>
-      <div class="field">
-        <label for="new-low">Low at</label>
-        <input id="new-low" type="number" step="any" min="0" placeholder="optional">
-      </div>
-      <div class="field">
-        <label for="new-area">Area</label>
-        <select id="new-area"><option value="">—</option></select>
-      </div>
-      <div class="field">
-        <label for="new-category">Category</label>
-        <select id="new-category"><option value="">—</option></select>
-      </div>
-      <div class="field">
-        <label for="new-location">Location</label>
-        <select id="new-location"><option value="">—</option></select>
-      </div>
-      <div class="field">
-        <label for="new-lot">Lot</label>
-        <input id="new-lot" type="text" placeholder="optional">
-      </div>
-      <div class="field">
-        <label for="new-supplier">Supplier</label>
-        <input id="new-supplier" type="text" placeholder="optional">
-      </div>
-      <div class="field">
-        <label for="new-lead-time">Lead time (days)</label>
-        <input id="new-lead-time" type="number" min="0" placeholder="optional">
-      </div>
+      <p class="hint">Pick the area first: categories and shelves follow it.</p>
+    </fieldset>
+
+    <div class="group-pair">
+      <fieldset class="group">
+        <legend>Stock levels</legend>
+        <div class="grid g-two">
+          <div class="field">
+            <label for="new-min">Reorder at</label>
+            <input id="new-min" type="number" step="any" min="0" value="0">
+          </div>
+          <div class="field">
+            <label for="new-low">Low at</label>
+            <input id="new-low" type="number" step="any" min="0" placeholder="Optional">
+          </div>
+        </div>
+        <p class="hint">Reorder is flagged at or below the first number; low stock below the second.</p>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Supply</legend>
+        <div class="grid g-three">
+          <div class="field">
+            <label for="new-supplier">Supplier</label>
+            <input id="new-supplier" type="text" placeholder="Optional">
+          </div>
+          <div class="field">
+            <label for="new-lead-time">Lead time, days</label>
+            <input id="new-lead-time" type="number" min="0" placeholder="Optional">
+          </div>
+          <div class="field">
+            <label for="new-lot">Lot</label>
+            <input id="new-lot" type="text" placeholder="Optional">
+          </div>
+        </div>
+      </fieldset>
     </div>
 
-    <h3>Label</h3>
-    <div class="row wrap gap">
-      <label class="checkbox"><input id="new-print" type="checkbox" checked>
-        <span id="new-print-text">Print a label when added</span></label>
-      <div class="field">
-        <label for="copies">Copies</label>
-        <input id="copies" type="number" min="1" max="50" value="1">
+    <fieldset class="group label-group">
+      <legend>Label</legend>
+      <div class="label-layout">
+        <div class="label-options">
+          <label class="checkbox"><input id="new-print" type="checkbox" checked>
+            <span id="new-print-text">Print a label when added</span></label>
+          <div class="grid g-two">
+            <div class="field">
+              <label for="copies">Copies</label>
+              <input id="copies" type="number" min="1" max="50" value="1">
+            </div>
+            <div class="field">
+              <label for="symbology">Code type</label>
+              <select id="symbology">
+                <option value="code128">Code 128</option>
+                <option value="qr">QR code</option>
+                <option value="code39">Code 39</option>
+                <option value="ean13">EAN-13</option>
+              </select>
+            </div>
+          </div>
+          <button id="btn-preview" type="button">Preview label</button>
+        </div>
+        <div class="label-stage">
+          <img id="preview" alt="Label preview" hidden>
+          <p class="label-empty">The preview shows the label exactly as the printer will print it.</p>
+        </div>
       </div>
-      <div class="field">
-        <label for="symbology">Code type</label>
-        <select id="symbology">
-          <option value="code128">Code 128</option>
-          <option value="qr">QR code</option>
-          <option value="code39">Code 39</option>
-          <option value="ean13">EAN-13</option>
-        </select>
-      </div>
-      <button id="btn-preview" type="button">Preview label</button>
-    </div>
-    <img id="preview" alt="Label preview" hidden>
+    </fieldset>
 
-    <div class="row gap" style="margin-top:16px">
+    <div class="form-actions">
       <button id="btn-create" class="primary">Add item</button>
       <button id="btn-cancel-create">Cancel</button>
       <button id="btn-archive-item" class="danger push-right" hidden>Archive item</button>
@@ -173,117 +226,87 @@
   </section>
 
   <!-- The scanned item's own recent movements: same look as the list below. -->
-  <section id="item-activity" class="card" hidden>
-    <h2>Recent activity</h2>
-    <table id="item-recent" class="compact"><tbody></tbody></table>
+  <section id="item-activity" class="panel" hidden>
+    <h2 class="panel-title">Recent activity</h2>
+    <table id="item-recent" class="ledger"><tbody></tbody></table>
   </section>
 
-  <section class="card" id="recent-card">
-    <h2>Recent activity</h2>
-    <table id="recent" class="compact"><tbody></tbody></table>
+  <section class="panel" id="recent-card">
+    <h2 class="panel-title">Recent activity</h2>
+    <table id="recent" class="ledger"><tbody></tbody></table>
   </section>
 </div>
 
 <div id="view-stock" class="view" hidden>
-  <section class="tiles" aria-label="Summary">
-  <button class="tile" id="tile-reorder" type="button" title="Show items that need attention">
-    <span class="label">Needs reorder</span><span class="n" id="count-reorder">–</span>
-  </button>
-  <button class="tile" id="tile-low" type="button" title="Show items that are running low">
-    <span class="label">Low stock</span><span class="n" id="count-low">–</span>
-  </button>
-</section>
-
-  <section class="card">
-    <div class="row between wrap">
-      <h2>Stock</h2>
-      <div class="row gap wrap">
-        <input id="search" type="search" placeholder="Search name, SKU or barcode">
-        <select id="filter-area"><option value="">All areas</option></select>
-        <select id="filter-category"><option value="">All categories</option></select>
-        <label class="checkbox"><input id="low-only" type="checkbox"> Low stock only</label>
+  <header class="page-head">
+    <h2>Stock</h2>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search name, SKU or barcode" aria-label="Search">
+      <select id="filter-area" aria-label="Area"><option value="">All areas</option></select>
+      <select id="filter-category" aria-label="Category"><option value="">All categories</option></select>
+      <div class="chips" role="group" aria-label="Show only">
+        <button class="chip chip-bad" id="tile-reorder" type="button" title="Show only items at or below their reorder level">
+          <span class="n" id="count-reorder">–</span> to reorder</button>
+        <button class="chip chip-warn" id="tile-low" type="button" title="Show only items running low">
+          <span class="n" id="count-low">–</span> running low</button>
       </div>
     </div>
+  </header>
+
+  <section class="panel flush">
     <div class="table-scroll">
-    <table id="items">
+    <table id="items" class="stock">
       <thead><tr>
-        <th>Name</th><th>SKU</th><th>Category</th><th>Location</th><th>Level</th>
-        <th class="num">On hand</th><th class="num">Reorder at</th><th></th>
+        <th>Item</th><th>Category and shelf</th><th>Level</th>
+        <th class="num">On hand</th><th class="num">Reorder at</th><th><span class="sr-only">Actions</span></th>
       </tr></thead>
       <tbody></tbody>
     </table>
     </div>
-    <p id="items-empty" class="muted" hidden>No items yet. Scan something to get started.</p>
-  </section>
-  <!-- Setup: the Area -> Category -> Item hierarchy and physical Locations
-       are all user-managed here, not fixed in the code. -->
-</div>
-
-<div id="view-archive" class="view" hidden>
-  <section class="card">
-    <h2>Archive</h2>
-    <p class="muted small">Archived things are hidden everywhere else but nothing is
-      deleted: their history stays, and Restore brings them back as they were.
-      Restoring an area also restores the categories and locations archived with it.</p>
-    <h3>Items</h3>
-    <table id="arch-items" class="compact"><tbody></tbody></table>
-    <h3>Areas</h3>
-    <table id="arch-areas" class="compact"><tbody></tbody></table>
-    <h3>Categories</h3>
-    <table id="arch-categories" class="compact"><tbody></tbody></table>
-    <h3>Locations</h3>
-    <table id="arch-locations" class="compact"><tbody></tbody></table>
+    <p id="items-empty" class="empty" hidden>No items match. Scan a label to add one, or clear the filters.</p>
   </section>
 </div>
 
 <div id="view-setup" class="view" hidden>
-  <section class="card">
-    <h2>Areas, categories &amp; locations</h2>
-    <details class="labels" open>
-      <summary>Areas</summary>
-      <table id="areas" class="compact"><tbody></tbody></table>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="new-area-name">New area</label>
-          <input id="new-area-name" type="text" placeholder="e.g. Battery Testing">
-        </div>
-        <button id="btn-add-area">Add area</button>
-      </div>
-    </details>
-    <details class="labels">
-      <summary>Categories</summary>
-      <table id="categories" class="compact"><tbody></tbody></table>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="new-category-area">Area</label>
-          <select id="new-category-area"><option value="">—</option></select>
-        </div>
-        <div class="field">
-          <label for="new-category-name">New category</label>
-          <input id="new-category-name" type="text" placeholder="e.g. Electrodes">
-        </div>
-        <div class="field">
-          <label for="new-category-prefix">SKU prefix</label>
-          <input id="new-category-prefix" type="text" maxlength="8" placeholder="auto">
-        </div>
-        <button id="btn-add-category">Add category</button>
-      </div>
-    </details>
-    <details class="labels">
-      <summary>Locations</summary>
-      <table id="locations" class="compact"><tbody></tbody></table>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="new-location-area">Area</label>
-          <select id="new-location-area"><option value="">—</option></select>
-        </div>
-        <div class="field grow">
-          <label for="new-location-name">Name</label>
-          <input id="new-location-name" type="text" placeholder="e.g. Shelf 1">
-        </div>
-        <button id="btn-add-location">Add location</button>
-      </div>
-    </details>
+  <header class="page-head">
+    <div>
+      <h2>Setup</h2>
+      <p class="lede">Each area of the lab or warehouse has its own categories and shelves.</p>
+    </div>
+    <div class="inline-add">
+      <label for="new-area-name" class="sr-only">New area name</label>
+      <input id="new-area-name" type="text" placeholder="New area, e.g. Battery Testing">
+      <button id="btn-add-area" class="primary">Add area</button>
+    </div>
+  </header>
+  <!-- Rendered by app.js: one block per area with its categories and shelves. -->
+  <div id="setup-areas"></div>
+</div>
+
+<div id="view-archive" class="view" hidden>
+  <header class="page-head">
+    <div>
+      <h2>Archive</h2>
+      <p class="lede">Archived things are hidden everywhere else, but nothing is deleted.
+        Restore brings them back with their history. Restoring an area also restores the
+        categories and shelves archived with it.</p>
+    </div>
+  </header>
+  <section class="panel">
+    <h3 class="panel-title">Items</h3>
+    <table id="arch-items" class="ledger"><tbody></tbody></table>
+  </section>
+  <section class="panel">
+    <h3 class="panel-title">Areas</h3>
+    <table id="arch-areas" class="ledger"><tbody></tbody></table>
+  </section>
+  <section class="panel">
+    <h3 class="panel-title">Categories</h3>
+    <table id="arch-categories" class="ledger"><tbody></tbody></table>
+  </section>
+  <section class="panel">
+    <h3 class="panel-title">Shelves</h3>
+    <table id="arch-locations" class="ledger"><tbody></tbody></table>
   </section>
 </div>
 </main>
