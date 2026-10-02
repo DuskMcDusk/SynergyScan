@@ -106,7 +106,7 @@ def test_archived_items_are_not_found_by_scanning(con, item):
 def test_create_item_accepts_the_new_master_fields(con):
     area = db.create_area(con, "Battery Testing")
     category = db.create_category(con, area, "Electrodes")
-    location = db.create_location(con, "D1", "Shelf D1")
+    location = db.create_location(con, "Shelf D1")
     item_id = db.create_item(
         con, sku="FOAM-001", name="Fe foam", category_id=category,
         location_id=location, supplier="Supplier A", lead_time_days=30,
@@ -198,19 +198,22 @@ def test_category_name_is_unique_within_an_area_but_not_across_areas(con):
 
 # --------------------------------------------------------------- locations
 def test_create_and_list_locations(con):
-    db.create_location(con, "D1", "Shelf D1")
-    db.create_location(con, "C4", "Drawer C4")
-    assert [l["code"] for l in db.list_locations(con)] == ["C4", "D1"]
+    area = db.create_area(con, "A")
+    db.create_location(con, "Shelf D1", area_id=area)
+    db.create_location(con, "Drawer C4", area_id=area)
+    assert [l["name"] for l in db.list_locations(con)] == ["Drawer C4", "Shelf D1"]
 
 
-def test_location_code_is_unique(con):
-    db.create_location(con, "D1", "Shelf D1")
+def test_location_name_is_unique_within_an_area_only(con):
+    a, b = db.create_area(con, "A"), db.create_area(con, "B")
+    db.create_location(con, "Shelf 1", area_id=a)
+    db.create_location(con, "Shelf 1", area_id=b)          # other area: fine
     with pytest.raises(sqlite3.IntegrityError):
-        db.create_location(con, "d1", "Somewhere else")
+        db.create_location(con, "shelf 1", area_id=a)
 
 
 def test_update_location_fields(con):
-    loc = db.create_location(con, "D1", "Shelf D1")
+    loc = db.create_location(con, "Shelf D1")
     db.update_location(con, loc, name="Shelf D1 (top)")
     assert db.get_location(con, loc)["name"] == "Shelf D1 (top)"
 
@@ -342,7 +345,7 @@ def test_stock_on_hand_view_lists_derived_quantities(con, item):
 def test_list_items_exposes_the_new_item_master_columns(con):
     area = db.create_area(con, "Battery Testing")
     category = db.create_category(con, area, "Electrodes")
-    location = db.create_location(con, "D1", "Shelf D1")
+    location = db.create_location(con, "Shelf D1")
     db.create_item(con, sku="FOAM-001", name="Fe foam", category_id=category,
                    location_id=location, low_qty=8, min_qty=5,
                    supplier="Supplier A", lead_time_days=30)

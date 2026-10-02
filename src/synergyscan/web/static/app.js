@@ -17,7 +17,6 @@ const $ = (sel) => document.querySelector(sel);
 
 const el = {
   scan: $("#scan"),
-  scanGo: $("#scan-go"),
   toasts: $("#toasts"),
   printerPill: $("#printer-pill"),
   version: $("#version"),
@@ -27,36 +26,38 @@ const el = {
   sku: $("#item-sku"),
   unit: $("#item-unit"),
   qty: $("#item-qty"),
+  shelf: $("#item-shelf"),
+  shelfRow: $("#item-shelf-row"),
+  lotRow: $("#item-lot-row"),
+  setupAreas: $("#setup-areas"),
+  where: $("#item-where"),
+  lot: $("#item-lot"),
+  activity: $("#item-activity"),
+  itemRecent: $("#item-recent tbody"),
+  recentCard: $("#recent-card"),
   availability: $("#item-availability"),
   moveQty: $("#move-qty"),
-  moveLot: $("#move-lot"),
-  movements: $("#item-movements tbody"),
-
-  editCategory: $("#edit-category"),
-  editLocation: $("#edit-location"),
-  editSupplier: $("#edit-supplier"),
-  editLeadTime: $("#edit-lead-time"),
-  editLowQty: $("#edit-low-qty"),
-
-  lots: $("#item-lots tbody"),
-  newLotCode: $("#new-lot-code"),
-
   newPanel: $("#new-item-panel"),
   unknownCode: $("#unknown-code"),
   newName: $("#new-name"),
   newSku: $("#new-sku"),
   newUnit: $("#new-unit"),
   newMin: $("#new-min"),
+  newArea: $("#new-area"),
   newCategory: $("#new-category"),
-
+  newLow: $("#new-low"),
+  newLocation: $("#new-location"),
+  newSupplier: $("#new-supplier"),
+  newLot: $("#new-lot"),
+  newLeadTime: $("#new-lead-time"),
+  newPrint: $("#new-print"),
+  preview: $("#preview"),
   copies: $("#copies"),
   symbology: $("#symbology"),
-  preview: $("#preview"),
 
   items: $("#items tbody"),
   itemsEmpty: $("#items-empty"),
   search: $("#search"),
-  lowOnly: $("#low-only"),
   filterArea: $("#filter-area"),
   filterCategory: $("#filter-category"),
 
@@ -67,21 +68,19 @@ const el = {
   countReorder: $("#count-reorder"),
   countLow: $("#count-low"),
 
-  areas: $("#areas tbody"),
   newAreaName: $("#new-area-name"),
-  categories: $("#categories tbody"),
-  newCategoryArea: $("#new-category-area"),
-  newCategoryName: $("#new-category-name"),
-  newCategoryPrefix: $("#new-category-prefix"),
-  locations: $("#locations tbody"),
-  newLocationCode: $("#new-location-code"),
-  newLocationName: $("#new-location-name"),
 };
 
 let currentItem = null;
+/* *Cache: the active rows, offered in lists and forms. all*: active and
+   archived, used only to show a name - an item can still point at an archived
+   category or shelf, and that must not turn into a blank. */
 let areasCache = [];
 let categoriesCache = [];
 let locationsCache = [];
+let allAreas = [];
+let allCategories = [];
+let allLocations = [];
 let availFilter = "";  // "", "reorder" or "low": set by the summary tiles
 let allItems = [];   // unfiltered list: feeds the sidebar counts and the summary tiles
 
@@ -153,12 +152,39 @@ function fillSelect(sel, list, placeholder, labelFn) {
   sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "";
 }
 
+/* A shelf only has meaning inside its area ("Shelf 1" exists in every area), so
+   it is always shown with its area. */
+function locLabel(l) {
+  const area = allAreas.find((a) => a.id === l.area_id);
+  return `${area ? area.name + " / " : ""}${l.name}`;
+}
+
+/* The shelves offered when creating an item: those of the chosen category's
+   area (plus any not yet assigned to an area), or all of them with no category. */
+const newFormArea = () => parseInt(el.newArea.value, 10) || null;
+
+function fillNewLocation() {
+  const area = newFormArea();
+  const list = locationsCache.filter((l) => !area || l.area_id === area || l.area_id === null);
+  fillSelect(el.newLocation, list, "—", area ? (l) => l.name : locLabel);
+}
+
+/* The item form is area-first: the area decides which categories and which
+   shelves are offered. With no area picked, everything is offered and picking a
+   category fills the area in. */
+function fillNewCategory() {
+  const area = newFormArea();
+  const list = categoriesCache.filter((c) => !area || c.area_id === area);
+  fillSelect(el.newCategory, list, "—",
+             area ? (c) => c.name : (c) => `${areaName(c.area_id)} / ${c.name}`);
+}
+
 /* -------------------------------------------------------------------- views
  * Three screens, one at a time: Scan (the item in hand), Stock (the list) and
  * Setup. The scan field stays on every screen; a successful scan or an Open
  * click always lands on Scan, where the item is. The URL hash records the
  * screen so reload and back/forward work. */
-const VIEWS = ["scan", "stock", "setup"];
+const VIEWS = ["scan", "stock", "setup", "archive"];
 let view = "scan";
 
 function showView(name) {
@@ -171,10 +197,41 @@ function showView(name) {
   document.body.dataset.view = name;
   if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
   if (name === "scan") { loadRecent(); refocus(); }
+  if (name === "archive") loadArchive();
   window.scrollTo(0, 0);
 }
 
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+
+/* Movement times arrive as "2026-10-02 15:11:07" (server local time). Today's
+   show just the time; older ones the day and month. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fmtWhen(stamp) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(stamp || "");
+  if (!m) return escapeHtml(stamp || "");
+  const now = new Date();
+  const sameDay = +m[1] === now.getFullYear() && +m[2] === now.getMonth() + 1 && +m[3] === now.getDate();
+  const time = `${m[4]}:${m[5]}`;
+  if (sameDay) return `Today ${time}`;
+  const day = `${+m[3]} ${MONTHS[+m[2] - 1]}`;
+  return +m[1] === now.getFullYear() ? `${day}, ${time}` : `${day} ${m[1]}`;
+}
+
+const REASON = {
+  receive: "Received", issue: "Issued", stocktake: "Counted", adjust: "Adjusted",
+  move_in: "Moved in", move_out: "Moved out",
+};
+
+/* One ledger row: when | what (+ optional detail) | signed quantity. */
+function ledgerRow(m, detailHtml = "") {
+  const tr = document.createElement("tr");
+  const sign = m.delta > 0 ? "+" : "−";
+  tr.innerHTML =
+    `<td class="when">${fmtWhen(m.created_at)}</td>` +
+    `<td>${REASON[m.reason] || escapeHtml(m.reason)}${detailHtml}</td>` +
+    `<td class="delta ${m.delta > 0 ? "in" : "out"}">${sign}${fmt(Math.abs(m.delta))}</td>`;
+  return tr;
+}
 
 async function loadRecent() {
   let list = [];
@@ -185,14 +242,22 @@ async function loadRecent() {
     return;
   }
   for (const m of list) {
-    const tr = document.createElement("tr");
-    const sign = m.delta > 0 ? "+" : "";
-    tr.innerHTML =
-      `<td class="muted">${m.created_at}</td>` +
-      `<td>${escapeHtml(m.name)} <span class="muted">${escapeHtml(m.sku)}</span></td>` +
-      `<td>${m.reason}</td><td class="num">${sign}${fmt(m.delta)}</td>`;
-    el.recent.appendChild(tr);
+    el.recent.appendChild(ledgerRow(m,
+      `: <strong>${escapeHtml(m.name)}</strong><span class="sku">${escapeHtml(m.sku)}</span>`));
   }
+}
+
+/* Select `row` in `sel`; if it is archived (so not among the options), add it
+   as an extra option marked "(archived)" so saving the form keeps it. */
+function keepArchivedOption(sel, row, labelFn) {
+  if (!row) { sel.value = ""; return; }
+  sel.value = String(row.id);
+  if (sel.value === String(row.id)) return;
+  const opt = document.createElement("option");
+  opt.value = row.id;
+  opt.textContent = `${labelFn(row)} (archived)`;
+  sel.appendChild(opt);
+  sel.value = String(row.id);
 }
 
 /* --------------------------------------------------------------------- scan */
@@ -206,6 +271,8 @@ async function doScan() {
     });
     if (res.found) {
       showItem(await api(`/api/items/${res.item.id}`));
+    } else if (res.archived_item) {
+      showArchivedHit(res.archived_item);
     } else {
       showUnknown(res.code);
     }
@@ -215,22 +282,62 @@ async function doScan() {
   el.scan.value = "";
 }
 
+let archivedHit = null;
+
+function showArchivedHit(item) {
+  showView("scan");
+  currentItem = null;
+  archivedHit = item;
+  el.panel.hidden = true;
+  el.activity.hidden = true;
+  el.newPanel.hidden = true;
+  el.recentCard.hidden = true;
+  $("#archived-hit").hidden = false;
+  $("#archived-hit-name").textContent = item.name;
+  $("#archived-hit-sku").textContent = item.sku;
+  refocus();
+}
+
+function hideArchivedHit() {
+  archivedHit = null;
+  $("#archived-hit").hidden = true;
+}
+
 let scannedCode = "";
 let suggestedSku = "";
+let editingId = null;   // set while the form edits an existing item instead of creating one
 
 function showUnknown(code) {
   showView("scan");
+  hideArchivedHit();
+  $("#btn-archive-item").hidden = true;
   currentItem = null;
+  editingId = null;
+  $("#btn-create").textContent = "Add item";
+  $("#new-print").checked = true;
+  $("#new-print-text").textContent = "Print a label when added";
   scannedCode = code;
   suggestedSku = "";
   el.panel.hidden = true;
+  el.activity.hidden = true;
   el.newPanel.hidden = false;
+  el.recentCard.hidden = true;
   $("#new-title").textContent = "Not in the system yet";
   $("#new-lead").hidden = false;
   el.unknownCode.textContent = code;
   el.newSku.value = "";
   el.newName.value = "";
+  el.newArea.value = "";
+  fillNewCategory();
+  fillNewLocation();
   el.newCategory.value = "";
+  el.newLocation.value = "";
+  el.newSupplier.value = "";
+  el.newLot.value = "";
+  el.newLeadTime.value = "";
+  el.newLow.value = "";
+  el.preview.hidden = true;
+  el.newMin.value = "0";
   el.newName.focus();
 }
 
@@ -247,6 +354,7 @@ function showNewItem() {
    it can be seen (and overridden) before saving. A SKU the user has typed over
    is left alone. */
 async function prefillSku() {
+  if (editingId) return;      // an existing item keeps its SKU unless it is typed over
   const typed = el.newSku.value.trim();
   if (typed && typed !== suggestedSku && typed !== scannedCode) return;
   const cat = el.newCategory.value;
@@ -261,10 +369,13 @@ async function prefillSku() {
    movements and lots all in one call. */
 function showItem(item) {
   showView("scan");
+  hideArchivedHit();
   currentItem = item;
   el.newPanel.hidden = true;
   el.panel.hidden = false;
-  el.preview.hidden = true;
+  el.activity.hidden = false;
+  el.recentCard.hidden = true;
+  setMoveQty(1);
   renderItem(item);
   refocus();
 }
@@ -280,11 +391,32 @@ function renderItem(item) {
   el.name.textContent = item.name;
   el.sku.textContent = item.sku;
   el.unit.textContent = item.unit;
+  el.lot.textContent = item.lot || "";
+  el.lotRow.hidden = !item.lot;
   el.qty.textContent = fmt(item.qty);
+  const cat = allCategories.find((c) => c.id === item.category_id);
+  const loc = allLocations.find((l) => l.id === item.location_id);
+  // Area › Category above the name; the shelf sits with the other facts.
+  const areaId = (cat && cat.area_id) || (loc && loc.area_id);
+  el.where.textContent = [areaId && areaName(areaId), cat && cat.name].filter(Boolean).join(" › ");
+  el.shelf.textContent = loc ? loc.name : "";
+  el.shelfRow.hidden = !loc;
+  renderItemActivity(item.movements);
   setAvailability(item.availability);
-  renderMovements(item.movements);
-  renderLots(item.lots, item.unit);
-  fillItemDetailForm(item);
+}
+
+/* Same rows as the front-page "Recent activity" (when, what, how many), but only
+   for this item - so the item name is left out - newest first. */
+function renderItemActivity(list) {
+  el.itemRecent.innerHTML = "";
+  if (!list || !list.length) {
+    el.itemRecent.innerHTML = '<tr><td class="muted">Nothing booked for this item yet.</td></tr>';
+    return;
+  }
+  for (const m of list.slice(0, 8)) {
+    el.itemRecent.appendChild(ledgerRow(m,
+      m.note ? ` <span class="muted">${escapeHtml(m.note)}</span>` : ""));
+  }
 }
 
 function setAvailability(a) {
@@ -294,55 +426,24 @@ function setAvailability(a) {
   el.availability.className = `pill ${classes[a] || "muted"}`;
 }
 
-function fillItemDetailForm(item) {
-  el.editCategory.value = item.category_id ?? "";
-  el.editLocation.value = item.location_id ?? "";
-  el.editSupplier.value = item.supplier || "";
-  el.editLeadTime.value = item.lead_time_days ?? "";
-  el.editLowQty.value = item.low_qty ?? "";
-}
-
-function renderLots(list, unit) {
-  el.lots.innerHTML = "";
-  if (!list || !list.length) {
-    el.lots.innerHTML = '<tr><td class="muted">No lots recorded yet.</td></tr>';
-  } else {
-    for (const l of list) {
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        `<td>${escapeHtml(l.code)}</td>` +
-        `<td class="num">${fmt(l.qty)} ${escapeHtml(unit || "")}</td>` +
-        `<td class="muted">${l.received_at ? escapeHtml(l.received_at) : ""}</td>` +
-        `<td><button data-archive-lot="${l.id}">Archive</button></td>`;
-      el.lots.appendChild(tr);
-    }
-  }
-  fillSelect(el.moveLot, (list || []).filter((l) => !l.archived), "(no lot)",
-            (l) => `${l.code} (${fmt(l.qty)})`);
-}
-
-function renderMovements(list) {
-  el.movements.innerHTML = "";
-  if (!list || !list.length) {
-    el.movements.innerHTML =
-      '<tr><td class="muted">No movements recorded yet.</td></tr>';
-    return;
-  }
-  for (const m of list) {
-    const tr = document.createElement("tr");
-    const sign = m.delta > 0 ? "+" : "";
-    tr.innerHTML =
-      `<td>${m.created_at}</td><td>${m.reason}</td>` +
-      `<td class="num">${sign}${fmt(m.delta)}</td>` +
-      `<td class="muted">${m.note ? escapeHtml(m.note) : ""}</td>`;
-    el.movements.appendChild(tr);
-  }
-}
-
 function escapeHtml(s) {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
+}
+
+/* ------------------------------------------------------------------ counter
+ * The − / + buttons step the quantity; the action buttons repeat it so the
+ * operator sees exactly what will be booked ("Receive 5 in"). */
+function setMoveQty(n) {
+  el.moveQty.value = fmt(n);
+  syncMoveLabels();
+}
+
+function syncMoveLabels() {
+  const n = parseFloat(el.moveQty.value);
+  const text = Number.isFinite(n) && n > 0 ? fmt(n) : "…";
+  for (const span of el.panel.querySelectorAll("[data-reason] .n")) span.textContent = text;
 }
 
 /* ---------------------------------------------------------------- movements */
@@ -353,70 +454,18 @@ async function move(reason) {
     say("Enter a quantity greater than zero.", "error");
     return;
   }
-  const lotId = el.moveLot.value ? parseInt(el.moveLot.value, 10) : null;
   try {
-    if (reason === "stocktake") {
-      await api("/api/stocktake", {
-        method: "POST",
-        body: JSON.stringify({ item_id: currentItem.id, counted: amount }),
-      });
-      say(`Counted ${fmt(amount)} ${currentItem.unit}.`);
-    } else {
-      const delta = reason === "issue" ? -amount : amount;
-      await api("/api/movements", {
-        method: "POST",
-        body: JSON.stringify({ item_id: currentItem.id, delta, reason, lot_id: lotId }),
-      });
-      say(`${reason === "issue" ? "Issued" : "Received"} ${fmt(amount)} ` +
-          `${currentItem.unit} of ${currentItem.name}.`);
-    }
+    const delta = reason === "issue" ? -amount : amount;
+    await api("/api/movements", {
+      method: "POST",
+      body: JSON.stringify({ item_id: currentItem.id, delta, reason }),
+    });
+    say(`${reason === "issue" ? "Issued" : "Received"} ${fmt(amount)} ` +
+        `${currentItem.unit} of ${currentItem.name}.`);
+    setMoveQty(1);
     await refreshItem();
     await loadItems();
     loadRecent();
-  } catch (e) {
-    say(e.message, "error");
-  }
-  refocus();
-}
-
-async function addLot() {
-  if (!currentItem) return;
-  const code = el.newLotCode.value.trim();
-  if (!code) {
-    say("Enter a lot code.", "error");
-    return;
-  }
-  try {
-    await api("/api/lots", {
-      method: "POST",
-      body: JSON.stringify({ item_id: currentItem.id, code }),
-    });
-    el.newLotCode.value = "";
-    say(`Added lot ${code}.`);
-    await refreshItem();
-  } catch (e) {
-    say(e.message, "error");
-  }
-  refocus();
-}
-
-async function saveItemDetails() {
-  if (!currentItem) return;
-  const body = {
-    category_id: el.editCategory.value ? parseInt(el.editCategory.value, 10) : null,
-    location_id: el.editLocation.value ? parseInt(el.editLocation.value, 10) : null,
-    supplier: el.editSupplier.value.trim() || null,
-    lead_time_days: el.editLeadTime.value ? parseInt(el.editLeadTime.value, 10) : null,
-    low_qty: el.editLowQty.value ? parseFloat(el.editLowQty.value) : null,
-  };
-  try {
-    await api(`/api/items/${currentItem.id}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
-    say("Item details saved.");
-    await refreshItem();
-    await loadItems();
   } catch (e) {
     say(e.message, "error");
   }
@@ -427,7 +476,6 @@ async function saveItemDetails() {
 async function loadItems() {
   const params = new URLSearchParams();
   if (el.search.value.trim()) params.set("search", el.search.value.trim());
-  if (el.lowOnly.checked) params.set("low", "true");
   if (el.filterArea.value) params.set("area_id", el.filterArea.value);
   if (el.filterCategory.value) params.set("category_id", el.filterCategory.value);
   let list = [];
@@ -448,16 +496,20 @@ async function loadItems() {
     if (it.availability === "reorder" || it.availability === "low") {
       tr.className = it.availability;
     }
-    const cat = categoriesCache.find((c) => c.id === it.category_id);
-    const loc = locationsCache.find((l) => l.id === it.location_id);
+    const cat = allCategories.find((c) => c.id === it.category_id);
+    const loc = allLocations.find((l) => l.id === it.location_id);
+    const where = cat || loc
+      ? `${cat ? escapeHtml(cat.name) : '<span class="muted">No category</span>'}` +
+        (loc ? `<span>${escapeHtml(locLabel(loc))}</span>` : "")
+      : '<span class="muted">Not set</span>';
     tr.innerHTML =
-      `<td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.sku)}</td>` +
-      `<td class="muted">${cat ? escapeHtml(cat.name) : ""}</td>` +
-      `<td class="muted">${loc ? escapeHtml(loc.code) : ""}</td>` +
+      `<td class="item-cell"><strong>${escapeHtml(it.name)}</strong><span>${escapeHtml(it.sku)}</span></td>` +
+      `<td class="where-cell">${where}</td>` +
       `<td>${levelMeter(it)}</td>` +
-      `<td class="num">${fmt(it.qty)} ${escapeHtml(it.unit)}</td>` +
+      `<td class="num qty-cell">${fmt(it.qty)}<small>${escapeHtml(it.unit)}</small></td>` +
       `<td class="num muted">${fmt(it.min_qty)}</td>` +
-      `<td><button data-open="${it.item_id}">Open</button></td>`;
+      `<td class="actions-cell"><button class="ghost" data-open="${it.item_id}">Open</button>` +
+      `<button class="ghost" data-edit="${it.item_id}">Edit</button></td>`;
     el.items.appendChild(tr);
   }
 }
@@ -465,9 +517,9 @@ async function loadItems() {
 /* A bar for how far above the reorder point an item is: full at twice the
    reorder level or more. Items with no reorder level set show as full. */
 function levelMeter(it) {
-  const pct = it.min_qty > 0
-    ? Math.max(3, Math.min(100, (it.qty / (it.min_qty * 2)) * 100))
-    : 100;
+  // Without a reorder point there is nothing to measure against.
+  if (!(it.min_qty > 0)) return '<span class="no-level" title="No reorder level set">—</span>';
+  const pct = Math.max(3, Math.min(100, (it.qty / (it.min_qty * 2)) * 100));
   const cls = it.availability === "reorder" ? "zero" : it.availability === "low" ? "lo" : "";
   return `<span class="meter" aria-hidden="true"><i class="${cls}" style="width:${pct}%"></i></span>`;
 }
@@ -480,6 +532,7 @@ async function refreshStats() {
   el.countReorder.textContent = allItems.filter((i) => i.availability === "reorder").length;
   el.countLow.textContent = allItems.filter((i) => i.availability === "low").length;
   renderNav();
+  renderSetup();       // its per-area item counts come from this list
   renderUnitOptions();
 }
 
@@ -549,13 +602,95 @@ try {
   }
 } catch { /* storage unavailable: start expanded */ }
 
+/* Edit: the same form as creating, filled from the item. The scanned-code line
+   is replaced by a heading and the SKU stays as it is unless it is typed over. */
+async function showEdit(id) {
+  let item;
+  try {
+    item = await api(`/api/items/${id}`);
+  } catch (e) {
+    say(e.message, "error");
+    return;
+  }
+  showUnknown("");
+  editingId = item.id;
+  currentItem = item;
+  scannedCode = item.barcode || "";      // the label's barcode, as it is now
+  $("#new-title").textContent = `Edit ${item.name}`;
+  $("#new-lead").hidden = true;
+  $("#btn-create").textContent = "Save changes";
+  $("#new-print").checked = false;
+  $("#new-print-text").textContent = "Print a label after saving";
+  el.newName.value = item.name;
+  el.newSku.value = item.sku;
+  el.newUnit.value = item.unit;
+  el.newMin.value = fmt(item.min_qty);
+  el.newLow.value = item.low_qty ?? "";
+  const cat = allCategories.find((c) => c.id === item.category_id);
+  const loc = allLocations.find((l) => l.id === item.location_id);
+  const area = (cat && cat.area_id) || (loc && loc.area_id) || "";
+  el.newArea.value = area;
+  if (area && el.newArea.value !== String(area)) {
+    keepArchivedOption(el.newArea, allAreas.find((a) => a.id === area), (a) => a.name);
+  }
+  fillNewCategory();
+  keepArchivedOption(el.newCategory, cat, (c) => c.name);
+  fillNewLocation();
+  keepArchivedOption(el.newLocation, loc, (l) => l.name);
+  $("#btn-archive-item").hidden = false;
+  el.newLot.value = item.lot || "";
+  el.newSupplier.value = item.supplier || "";
+  el.newLeadTime.value = item.lead_time_days ?? "";
+}
+
+async function saveEdit() {
+  const name = el.newName.value.trim();
+  const sku = el.newSku.value.trim();
+  if (!name || !sku) {
+    say("An item needs a name and a SKU.", "error");
+    return;
+  }
+  const body = {
+    sku,
+    name,
+    unit: el.newUnit.value.trim() || "pcs",
+    min_qty: parseFloat(el.newMin.value) || 0,
+    category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
+    location_id: el.newLocation.value ? parseInt(el.newLocation.value, 10) : null,
+    supplier: el.newSupplier.value.trim() || null,
+    lot: el.newLot.value.trim() || null,
+    lead_time_days: el.newLeadTime.value ? parseInt(el.newLeadTime.value, 10) : null,
+    low_qty: el.newLow.value ? parseFloat(el.newLow.value) : null,
+  };
+  try {
+    const item = await api(`/api/items/${editingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    say(`Saved ${item.name}.`);
+    if (el.newPrint.checked) await printLabel(item.id);
+    editingId = null;
+    el.newPanel.hidden = true;
+    await loadItems();
+    showView("stock");
+  } catch (e) {
+    say(e.message, "error");
+  }
+}
+
 async function createItem() {
+  if (editingId) return saveEdit();
   const body = {
     sku: el.newSku.value.trim() === suggestedSku ? "" : el.newSku.value.trim(),
     name: el.newName.value.trim(),
     unit: el.newUnit.value.trim() || "pcs",
     min_qty: parseFloat(el.newMin.value) || 0,
     category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
+    location_id: el.newLocation.value ? parseInt(el.newLocation.value, 10) : null,
+    supplier: el.newSupplier.value.trim() || null,
+    lot: el.newLot.value.trim() || null,
+    lead_time_days: el.newLeadTime.value ? parseInt(el.newLeadTime.value, 10) : null,
+    low_qty: el.newLow.value ? parseFloat(el.newLow.value) : null,
   };
   /* The scanned label keeps working when the SKU differs from it. */
   const finalSku = body.sku || suggestedSku;
@@ -574,82 +709,194 @@ async function createItem() {
     say(`Added ${item.name}.`);
     showItem(await api(`/api/items/${item.id}`));
     await loadItems();
+    if (el.newPrint.checked) await printLabel(item.id);
   } catch (e) {
     say(e.message, "error");
   }
+}
+
+/* ----------------------------------------------------------------- printing
+ * Labels are printed when an item is created. The item already exists by then,
+ * so a printer fault is reported but never undoes the add. */
+async function printLabel(itemId) {
+  try {
+    const { job_id } = await api("/api/print", {
+      method: "POST",
+      body: JSON.stringify({
+        item_id: itemId,
+        copies: parseInt(el.copies.value, 10) || 1,
+        symbology: el.symbology.value,
+      }),
+    });
+    const result = await waitForJob(job_id);
+    if (result.ok) {
+      const [w, h] = result.label_mm || [];
+      say(`Printed ${result.copies} label${result.copies > 1 ? "s" : ""}` +
+          (w ? ` (${w}×${h} mm).` : "."));
+    } else {
+      // Already a sentence about a physical thing to fix - show it verbatim.
+      say(result.error, "error", 10000);
+    }
+  } catch (e) {
+    say(e.message, "error", 10000);
+  } finally {
+    refreshPrinter();
+    refocus();
+  }
+}
+
+/* Preview of the label as it will print, rendered by the same code as the
+   printer. The item does not exist yet, so the label is built from the form:
+   the SKU as text, and the scanned code (or the SKU) as the barcode. */
+async function previewLabel() {
+  const sku = el.newSku.value.trim();
+  if (!sku) {
+    say("Pick a category or type a SKU first: the label carries the SKU.", "error");
+    return;
+  }
+  try {
+    const res = await fetch("/api/print/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lines: [sku],
+        barcode_value: scannedCode || sku,
+        copies: 1,
+        symbology: el.symbology.value,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || body.detail || "could not render the preview");
+    }
+    const blob = await res.blob();
+    if (el.preview.src.startsWith("blob:")) URL.revokeObjectURL(el.preview.src);
+    el.preview.src = URL.createObjectURL(blob);
+    el.preview.hidden = false;
+  } catch (e) {
+    say(e.message, "error");
+  }
+}
+
+async function waitForJob(jobId, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await api(`/api/print/${jobId}`);
+    if (job.state === "done" || job.state === "failed") {
+      return job.result || { ok: job.state === "done" };
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error("The printer is taking longer than expected. Check it and try again.");
 }
 
 /* --------------------------------------------------- areas & categories & locations */
 async function loadAreas() {
   try {
-    areasCache = await api("/api/areas");
+    allAreas = await api("/api/areas?include_archived=true");
+    areasCache = allAreas.filter((a) => !a.archived);
   } catch (e) {
     say(e.message, "error");
     return;
   }
-  el.areas.innerHTML = "";
-  if (!areasCache.length) {
-    el.areas.innerHTML = '<tr><td class="muted">No areas yet.</td></tr>';
-  }
-  for (const a of areasCache) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${escapeHtml(a.name)}</td>` +
-      `<td><button data-archive-area="${a.id}">Archive</button></td>`;
-    el.areas.appendChild(tr);
-  }
-  fillSelect(el.newCategoryArea, areasCache, "(choose an area)");
+  fillSelect(el.newArea, areasCache, "—");
+  fillNewCategory();
   fillSelect(el.filterArea, areasCache, "All areas");
   renderNav();
+  renderSetup();
 }
 
 function areaName(areaId) {
-  const a = areasCache.find((x) => x.id === areaId);
+  const a = allAreas.find((x) => x.id === areaId);
   return a ? a.name : "—";
 }
 
 async function loadCategories() {
   try {
-    categoriesCache = await api("/api/categories");
+    allCategories = await api("/api/categories?include_archived=true");
+    categoriesCache = allCategories.filter((c) => !c.archived);
   } catch (e) {
     say(e.message, "error");
     return;
   }
-  el.categories.innerHTML = "";
-  if (!categoriesCache.length) {
-    el.categories.innerHTML = '<tr><td class="muted">No categories yet.</td></tr>';
-  }
-  for (const c of categoriesCache) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${escapeHtml(areaName(c.area_id))}</td><td>${escapeHtml(c.name)}</td>` +
-      `<td><code>${escapeHtml(c.prefix || "")}</code></td>` +
-      `<td><button data-archive-category="${c.id}">Archive</button></td>`;
-    el.categories.appendChild(tr);
-  }
   const label = (c) => `${areaName(c.area_id)} / ${c.name}`;
-  fillSelect(el.newCategory, categoriesCache, "—", label);
-  fillSelect(el.editCategory, categoriesCache, "—", label);
+  fillNewCategory();
   fillSelect(el.filterCategory, categoriesCache, "All categories", label);
   renderNav();
+  renderSetup();
 }
 
 async function loadLocations() {
   try {
-    locationsCache = await api("/api/locations");
+    allLocations = await api("/api/locations?include_archived=true");
+    locationsCache = allLocations.filter((l) => !l.archived);
   } catch (e) {
     say(e.message, "error");
     return;
   }
-  el.locations.innerHTML = "";
-  if (!locationsCache.length) {
-    el.locations.innerHTML = '<tr><td class="muted">No locations yet.</td></tr>';
+  fillNewLocation();
+  renderSetup();
+}
+
+/* Setup is drawn per area: each area with its own categories and shelves, and
+   the forms to add more right there, so nothing asks "which area?" twice. */
+function renderSetup() {
+  const box = el.setupAreas;
+  if (!box) return;
+  const itemsIn = new Map();
+  for (const it of allItems) {
+    const c = allCategories.find((x) => x.id === it.category_id);
+    if (c) itemsIn.set(c.area_id, (itemsIn.get(c.area_id) || 0) + 1);
   }
-  for (const l of locationsCache) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${escapeHtml(l.code)}</td><td>${escapeHtml(l.name)}</td>` +
-      `<td><button data-archive-location="${l.id}">Archive</button></td>`;
-    el.locations.appendChild(tr);
+  const entry = (row, kind, extra = "") =>
+    `<li><span class="name">${escapeHtml(row.name)}</span>${extra}` +
+    `<button class="ghost" data-archive-${kind}="${row.id}">Archive</button></li>`;
+  let html = "";
+  if (!areasCache.length) {
+    html = '<section class="panel"><p class="muted">No areas yet. Add the first one above, ' +
+           'for example the room or zone where things are kept.</p></section>';
   }
-  fillSelect(el.editLocation, locationsCache, "—", (l) => `${l.code} — ${l.name}`);
+  for (const a of areasCache) {
+    const cats = categoriesCache.filter((c) => c.area_id === a.id);
+    const locs = locationsCache.filter((l) => l.area_id === a.id);
+    const n = itemsIn.get(a.id) || 0;
+    html +=
+      `<section class="panel area-block" data-area="${a.id}">` +
+      `<header class="area-head"><h3>${escapeHtml(a.name)}</h3>` +
+      `<span class="muted">${n} item${n === 1 ? "" : "s"}</span>` +
+      `<button class="ghost push-right" data-archive-area="${a.id}">Archive area</button></header>` +
+      `<div class="area-cols">` +
+      `<div class="area-col"><h4>Categories</h4><ul class="entries">` +
+      (cats.length ? cats.map((c) => entry(c, "category",
+        c.prefix ? `<code title="SKU prefix">${escapeHtml(c.prefix)}</code>` : "")).join("")
+        : '<li class="none">No categories yet.</li>') +
+      `</ul><div class="inline-add">` +
+      `<input type="text" data-new-cat="${a.id}" placeholder="New category" aria-label="New category in ${escapeHtml(a.name)}">` +
+      `<input type="text" class="prefix" data-new-prefix="${a.id}" maxlength="8" placeholder="Prefix" ` +
+      `aria-label="SKU prefix" title="SKU prefix, generated if left empty">` +
+      `<button data-add-category="${a.id}">Add</button></div></div>` +
+      `<div class="area-col"><h4>Shelves</h4><ul class="entries">` +
+      (locs.length ? locs.map((l) => entry(l, "location")).join("")
+        : '<li class="none">No shelves yet.</li>') +
+      `</ul><div class="inline-add">` +
+      `<input type="text" data-new-loc="${a.id}" placeholder="New shelf, e.g. Shelf 1" aria-label="New shelf in ${escapeHtml(a.name)}">` +
+      `<button data-add-location="${a.id}">Add</button></div></div>` +
+      `</div></section>`;
+  }
+  // Shelves from before areas existed: offer to assign each one an area.
+  const loose = locationsCache.filter((l) => l.area_id === null);
+  if (loose.length) {
+    const opts = areasCache.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
+    html += `<section class="panel unassigned"><h3 class="panel-title">Shelves without an area</h3>` +
+      `<p class="muted small">These were created before shelves belonged to areas. Give each one its area.</p>` +
+      `<ul class="entries">` + loose.map((l) =>
+        `<li><span class="name">${escapeHtml(l.name)}</span>` +
+        `<select data-assign-area="${l.id}" aria-label="Area for ${escapeHtml(l.name)}">` +
+        `<option value="">Assign area…</option>${opts}</select>` +
+        `<button class="ghost" data-archive-location="${l.id}">Archive</button></li>`).join("") +
+      `</ul></section>`;
+  }
+  box.innerHTML = html;
 }
 
 async function addArea() {
@@ -668,121 +915,44 @@ async function addArea() {
   }
 }
 
-async function addCategory() {
-  const areaId = el.newCategoryArea.value;
-  const name = el.newCategoryName.value.trim();
-  if (!areaId) {
-    say("Choose an area first.", "error");
-    return;
-  }
+async function addCategory(areaId) {
+  const nameInput = el.setupAreas.querySelector(`[data-new-cat="${areaId}"]`);
+  const prefixInput = el.setupAreas.querySelector(`[data-new-prefix="${areaId}"]`);
+  const name = nameInput.value.trim();
   if (!name) {
-    say("Enter a category name.", "error");
+    say("Type a name for the new category.", "error");
+    nameInput.focus();
     return;
   }
   try {
     await api("/api/categories", {
       method: "POST",
-      body: JSON.stringify({
-        area_id: parseInt(areaId, 10), name,
-        prefix: el.newCategoryPrefix.value.trim() || null,
-      }),
+      body: JSON.stringify({ area_id: areaId, name, prefix: prefixInput.value.trim() || null }),
     });
-    el.newCategoryName.value = "";
-    el.newCategoryPrefix.value = "";
     say(`Added category ${name}.`);
     await loadCategories();
+    el.setupAreas.querySelector(`[data-new-cat="${areaId}"]`).focus();
   } catch (e) {
     say(e.message, "error");
   }
 }
 
-async function addLocation() {
-  const code = el.newLocationCode.value.trim();
-  const name = el.newLocationName.value.trim();
-  if (!code || !name) {
-    say("Enter both a code and a name.", "error");
+async function addLocation(areaId) {
+  const input = el.setupAreas.querySelector(`[data-new-loc="${areaId}"]`);
+  const name = input.value.trim();
+  if (!name) {
+    say("Type a name for the new shelf.", "error");
+    input.focus();
     return;
   }
   try {
-    await api("/api/locations", { method: "POST", body: JSON.stringify({ code, name }) });
-    el.newLocationCode.value = "";
-    el.newLocationName.value = "";
-    say(`Added location ${code}.`);
+    await api("/api/locations", { method: "POST", body: JSON.stringify({ area_id: areaId, name }) });
+    say(`Added shelf ${name}.`);
     await loadLocations();
+    el.setupAreas.querySelector(`[data-new-loc="${areaId}"]`).focus();
   } catch (e) {
     say(e.message, "error");
   }
-}
-
-/* ----------------------------------------------------------------- printing */
-function printBody() {
-  return {
-    item_id: currentItem ? currentItem.id : null,
-    copies: parseInt(el.copies.value, 10) || 1,
-    symbology: el.symbology.value,
-  };
-}
-
-async function preview() {
-  if (!currentItem) return;
-  try {
-    const res = await fetch("/api/print/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(printBody()),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || body.detail || "could not render the preview");
-    }
-    const blob = await res.blob();
-    if (el.preview.src.startsWith("blob:")) URL.revokeObjectURL(el.preview.src);
-    el.preview.src = URL.createObjectURL(blob);
-    el.preview.hidden = false;
-  } catch (e) {
-    say(e.message, "error");
-  }
-}
-
-async function print() {
-  if (!currentItem) return;
-  const btn = $("#btn-print");
-  btn.disabled = true;
-  btn.textContent = "Printing…";
-  try {
-    const { job_id } = await api("/api/print", {
-      method: "POST",
-      body: JSON.stringify(printBody()),
-    });
-    const result = await waitForJob(job_id);
-    if (result.ok) {
-      const [w, h] = result.label_mm || [];
-      say(`Printed ${result.copies} label${result.copies > 1 ? "s" : ""}` +
-          (w ? ` (${w}×${h} mm).` : "."));
-    } else {
-      // Already a sentence about a physical thing to fix - show it verbatim.
-      say(result.error, "error", 10000);
-    }
-  } catch (e) {
-    say(e.message, "error", 10000);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Print";
-    refocus();
-    refreshPrinter();
-  }
-}
-
-async function waitForJob(jobId, timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const job = await api(`/api/print/${jobId}`);
-    if (job.state === "done" || job.state === "failed") {
-      return job.result || { ok: job.state === "done" };
-    }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  throw new Error("The printer is taking longer than expected. Check it and try again.");
 }
 
 async function refreshPrinter() {
@@ -988,7 +1158,6 @@ async function updateNow() {
 el.scan.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); doScan(); }
 });
-el.scanGo.addEventListener("click", doScan);
 $("#btn-new-item").addEventListener("click", showNewItem);
 
 /* A datalist only offers options matching what is already typed, so the
@@ -1005,13 +1174,33 @@ el.newUnit.addEventListener("blur", () => {
   if (!el.newUnit.value.trim()) el.newUnit.value = unitDefault || "pcs";
 });
 
+/* Focus goes straight back to the scan field: a scanner's Enter must never
+   land on a − / + button and press it. */
+for (const btn of el.panel.querySelectorAll("[data-step]")) {
+  btn.addEventListener("click", () => {
+    const n = parseFloat(el.moveQty.value);
+    setMoveQty(Math.max(1, (Number.isFinite(n) ? n : 0) + Number(btn.dataset.step)));
+    refocus();
+  });
+}
+el.moveQty.addEventListener("input", syncMoveLabels);
+
 for (const btn of document.querySelectorAll("[data-reason]")) {
   btn.addEventListener("click", () => move(btn.dataset.reason));
 }
 
 $("#btn-create").addEventListener("click", createItem);
+$("#btn-preview").addEventListener("click", previewLabel);
+el.symbology.addEventListener("change", () => { if (!el.preview.hidden) previewLabel(); });
 $("#btn-cancel-create").addEventListener("click", () => {
+  if (editingId) {
+    editingId = null;
+    el.newPanel.hidden = true;
+    showView("stock");
+    return;
+  }
   el.newPanel.hidden = true;
+  el.recentCard.hidden = !el.panel.hidden;
   refocus();
 });
 $("#btn-restart").addEventListener("click", restartApp);
@@ -1023,65 +1212,189 @@ for (const id of ["#btn-update-later", "#btn-update-close"]) {
     $("#update-bar").hidden = true;
   });
 }
-$("#btn-preview").addEventListener("click", preview);
-$("#btn-print").addEventListener("click", print);
-$("#btn-save-details").addEventListener("click", saveItemDetails);
-$("#btn-add-lot").addEventListener("click", addLot);
 $("#btn-add-area").addEventListener("click", addArea);
-$("#btn-add-category").addEventListener("click", addCategory);
+el.newAreaName.addEventListener("keydown", (e) => { if (e.key === "Enter") addArea(); });
 el.newCategory.addEventListener("change", prefillSku);
-/* Show the prefix the server would pick as a placeholder while typing a name. */
-el.newCategoryName.addEventListener("input", async () => {
-  const name = el.newCategoryName.value.trim();
-  if (!name) { el.newCategoryPrefix.placeholder = "auto"; return; }
-  try {
-    const r = await api(`/api/categories/suggest-prefix?name=${encodeURIComponent(name)}`);
-    el.newCategoryPrefix.placeholder = r.prefix;
-  } catch { /* the placeholder is a convenience only */ }
+el.newCategory.addEventListener("change", () => {
+  const cat = categoriesCache.find((c) => c.id === parseInt(el.newCategory.value, 10));
+  if (cat && cat.area_id !== newFormArea()) {
+    el.newArea.value = cat.area_id;      // a category belongs to exactly one area
+    fillNewCategory();                   // now only that area's, without the prefix
+    fillNewLocation();
+  }
 });
-$("#btn-add-location").addEventListener("click", addLocation);
-
+el.newArea.addEventListener("change", () => {
+  fillNewCategory();
+  fillNewLocation();
+  prefillSku();                           // the category may have been cleared by the filter
+});
 el.items.addEventListener("click", async (e) => {
-  const id = e.target.dataset.open;
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.edit) { showEdit(b.dataset.edit); return; }
+  const id = b.dataset.open;
   if (!id) return;
   showItem(await api(`/api/items/${id}`));
 });
 
-el.lots.addEventListener("click", async (e) => {
-  const id = e.target.dataset.archiveLot;
-  if (!id) return;
-  try {
-    await api(`/api/lots/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
-    await refreshItem();
-  } catch (err) { say(err.message, "error"); }
+/* Everything in Setup is drawn by renderSetup(), so its controls are handled
+   here by delegation. */
+el.setupAreas.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const d = b.dataset;
+  if (d.addCategory) addCategory(parseInt(d.addCategory, 10));
+  else if (d.addLocation) addLocation(parseInt(d.addLocation, 10));
+  else if (d.archiveCategory) setArchived("categories", d.archiveCategory, true);
+  else if (d.archiveLocation) setArchived("locations", d.archiveLocation, true);
+  else if (d.archiveArea) confirmArchiveArea(parseInt(d.archiveArea, 10));
 });
 
-el.areas.addEventListener("click", async (e) => {
-  const id = e.target.dataset.archiveArea;
-  if (!id) return;
-  try {
-    await api(`/api/areas/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
-    await loadAreas();
-    await loadCategories();
-  } catch (err) { say(err.message, "error"); }
+el.setupAreas.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const d = e.target.dataset;
+  const area = parseInt(d.newCat || d.newPrefix || d.newLoc, 10);
+  if (!area) return;
+  if (d.newLoc) addLocation(area); else addCategory(area);
 });
 
-el.categories.addEventListener("click", async (e) => {
-  const id = e.target.dataset.archiveCategory;
-  if (!id) return;
+/* Show the prefix the server would pick as a placeholder while typing a name. */
+el.setupAreas.addEventListener("input", async (e) => {
+  const areaId = e.target.dataset.newCat;
+  if (!areaId) return;
+  const prefix = el.setupAreas.querySelector(`[data-new-prefix="${areaId}"]`);
+  const name = e.target.value.trim();
+  if (!name) { prefix.placeholder = "Prefix"; return; }
   try {
-    await api(`/api/categories/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
-    await loadCategories();
-  } catch (err) { say(err.message, "error"); }
+    const r = await api(`/api/categories/suggest-prefix?name=${encodeURIComponent(name)}`);
+    prefix.placeholder = r.prefix;
+  } catch { /* the placeholder is a convenience only */ }
 });
 
-el.locations.addEventListener("click", async (e) => {
-  const id = e.target.dataset.archiveLocation;
-  if (!id) return;
+el.setupAreas.addEventListener("change", async (e) => {
+  const id = e.target.dataset.assignArea;
+  if (!id || !e.target.value) return;
   try {
-    await api(`/api/locations/${id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
-    await loadLocations();
+    await api(`/api/locations/${id}`, {
+      method: "PATCH", body: JSON.stringify({ area_id: parseInt(e.target.value, 10) }),
+    });
+    say("Shelf assigned.");
   } catch (err) { say(err.message, "error"); }
+  await loadLocations();
+});
+
+function confirmArchiveArea(id) {
+  const area = areasCache.find((a) => a.id === id);
+  const cats = categoriesCache.filter((c) => c.area_id === id).length;
+  const locs = locationsCache.filter((l) => l.area_id === id).length;
+  overlay({
+    title: `Archive ${area ? area.name : "this area"}?`,
+    text: `Its ${cats} categor${cats === 1 ? "y" : "ies"} and ${locs} shel${locs === 1 ? "f" : "ves"} ` +
+          "are archived with it. Items keep their category and shelf. " +
+          "You can restore everything from the Archive page.",
+    actions: [
+      { label: "Archive", primary: true, onClick: async () => {
+        closeOverlay();
+        await setArchived("areas", id, true);
+      } },
+      { label: "Cancel", onClick: closeOverlay },
+    ],
+  });
+}
+
+/* ------------------------------------------------------------------ archive
+ * Archive and restore share one path: flip the flag, then reload everything,
+ * because an area takes its categories and locations with it. */
+const KIND_LABEL = { items: "item", areas: "area", categories: "category", locations: "shelf" };
+
+async function setArchived(kind, id, archived) {
+  try {
+    await api(`/api/${kind}/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) });
+    say(`${archived ? "Archived" : "Restored"} the ${KIND_LABEL[kind]}.`);
+  } catch (err) {
+    say(err.message, "error");
+    return false;
+  }
+  await loadAreas();
+  await loadCategories();
+  await loadLocations();
+  await loadItems();
+  if (view === "archive") loadArchive();
+  return true;
+}
+
+function archiveRows(tbody, list, kind, cells, empty) {
+  tbody.innerHTML = "";
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td class="muted">${empty}</td></tr>`;
+    return;
+  }
+  for (const row of list) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = cells(row).map((c) => `<td>${c}</td>`).join("") +
+      `<td class="actions-cell"><button class="ghost" data-restore="${kind}" data-id="${row.id}">Restore</button></td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadArchive() {
+  let items = [];
+  try { items = await api("/api/items?archived=true"); } catch (e) { say(e.message, "error"); }
+  archiveRows($("#arch-items tbody"), items, "items", (i) => [
+    escapeHtml(i.name), `<span class="muted">${escapeHtml(i.sku)}</span>`,
+    `<span class="num">${fmt(i.qty)} ${escapeHtml(i.unit)}</span>`,
+  ], "No archived items.");
+  archiveRows($("#arch-areas tbody"), allAreas.filter((a) => a.archived), "areas",
+    (a) => [escapeHtml(a.name)], "No archived areas.");
+  archiveRows($("#arch-categories tbody"), allCategories.filter((c) => c.archived), "categories",
+    (c) => [escapeHtml(areaName(c.area_id)), escapeHtml(c.name),
+            c.archived_by_area ? '<span class="muted small">with its area</span>' : ""],
+    "No archived categories.");
+  archiveRows($("#arch-locations tbody"), allLocations.filter((l) => l.archived), "locations",
+    (l) => [escapeHtml(areaName(l.area_id)), escapeHtml(l.name),
+            l.archived_by_area ? '<span class="muted small">with its area</span>' : ""],
+    "No archived shelves.");
+}
+
+$("#view-archive").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-restore]");
+  if (b) setArchived(b.dataset.restore, b.dataset.id, false);
+});
+
+/* Archiving an item takes it out of Stock and scanning, keeps its history. */
+$("#btn-archive-item").addEventListener("click", () => {
+  if (!editingId) return;
+  const id = editingId;
+  const name = el.newName.value.trim() || "this item";
+  const qty = currentItem ? currentItem.qty : 0;
+  overlay({
+    title: `Archive ${name}?`,
+    text: (qty ? `It still has ${fmt(qty)} ${currentItem.unit} on hand. ` : "") +
+          "It disappears from Stock and from scanning; its history is kept and it " +
+          "can be restored from the Archive page.",
+    actions: [
+      { label: "Archive", primary: true, onClick: async () => {
+        closeOverlay();
+        if (await setArchived("items", id, true)) {
+          editingId = null;
+          el.newPanel.hidden = true;
+          showView("stock");
+        }
+      } },
+      { label: "Cancel", onClick: closeOverlay },
+    ],
+  });
+});
+
+$("#btn-hit-restore").addEventListener("click", async () => {
+  if (!archivedHit) return;
+  const id = archivedHit.id;
+  if (await setArchived("items", id, false)) showItem(await api(`/api/items/${id}`));
+});
+$("#btn-hit-cancel").addEventListener("click", () => {
+  hideArchivedHit();
+  el.recentCard.hidden = false;
+  refocus();
 });
 
 el.nav.addEventListener("click", (e) => {
@@ -1111,7 +1424,7 @@ for (const [tile, which] of [[el.tileReorder, "reorder"], [el.tileLow, "low"]]) 
 }
 
 let searchTimer = null;
-for (const node of [el.search, el.lowOnly, el.filterArea, el.filterCategory]) {
+for (const node of [el.search, el.filterArea, el.filterCategory]) {
   node.addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadItems, 200);
