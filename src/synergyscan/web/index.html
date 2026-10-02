@@ -47,42 +47,48 @@
 <section id="scanbar">
   <label for="scan" class="sr-only">Scan or type a code</label>
   <input id="scan" type="text" autocomplete="off" autocapitalize="off"
-         spellcheck="false" placeholder="Scan a barcode, or type a SKU and press Enter">
-  <button id="scan-go" class="primary">Find</button>
-  <button id="btn-new-item" type="button">+ Add</button>
+         spellcheck="false" placeholder="Scan a barcode…">
+  <p class="scan-hint muted">Scan a label, or type a SKU and press Enter ·
+    <button id="btn-new-item" type="button" class="linkish">add a new item</button></p>
 </section>
 
 <main>
 <div id="view-scan" class="view">
   <!-- Shown when a scan resolves to an item -->
   <section id="item-panel" class="card" hidden>
-    <div class="row between">
+    <div class="item-top">
       <div>
+        <div id="item-where" class="label"></div>
         <h2 id="item-name">—</h2>
-        <p class="muted"><span id="item-sku"></span> · <span id="item-unit"></span></p>
+        <span id="item-availability" class="pill"></span>
+        <span class="muted"><span id="item-sku"></span> · <span id="item-unit"></span></span>
       </div>
       <div class="qty-block">
-        <div class="row gap" style="justify-content:flex-end">
-          <div id="item-qty" class="qty">0</div>
-          <span id="item-availability" class="pill"></span>
-        </div>
-        <div class="muted">on hand</div>
+        <div id="item-qty" class="qty">0</div>
+        <div class="label">on hand</div>
       </div>
     </div>
 
-    <div class="row wrap gap">
-      <div class="field">
-        <label for="move-qty">Quantity</label>
-        <input id="move-qty" type="number" step="any" min="0" value="1">
-      </div>
-      <div class="field">
-        <label for="move-lot">Lot</label>
-        <select id="move-lot"><option value="">(no lot)</option></select>
-      </div>
-      <button class="ok" data-reason="receive">Receive in</button>
-      <button class="warn" data-reason="issue">Issue out</button>
-      <button data-reason="stocktake" id="btn-stocktake">Set count to…</button>
+    <div class="stepper">
+      <button type="button" class="step" data-step="-1" aria-label="One less">−</button>
+      <input id="move-qty" type="number" step="any" min="0" value="1" aria-label="Quantity">
+      <button type="button" class="step" data-step="1" aria-label="One more">+</button>
     </div>
+    <div id="lot-field" class="lot-field" hidden>
+      <label for="move-lot">Lot</label>
+      <select id="move-lot"><option value="">(no lot)</option></select>
+    </div>
+    <div class="actions">
+      <button class="ok" data-reason="receive">Receive <span class="n">1</span> in</button>
+      <button class="warn" data-reason="issue">Issue <span class="n">1</span> out</button>
+    </div>
+    <p id="item-last" class="muted small"></p>
+
+    <details class="labels">
+      <summary>Correct the count</summary>
+      <p class="muted small">Sets the on-hand quantity to the number in the counter above.</p>
+      <button data-reason="stocktake" id="btn-stocktake">Set count to <span class="n">1</span></button>
+    </details>
 
     <details class="labels">
       <summary>Item details</summary>
@@ -147,8 +153,10 @@
       <img id="preview" alt="Label preview" hidden>
     </details>
 
-    <h3>Recent movements</h3>
-    <table id="item-movements" class="compact"><tbody></tbody></table>
+    <details class="labels">
+      <summary>History</summary>
+      <table id="item-movements" class="compact"><tbody></tbody></table>
+    </details>
   </section>
 
   <!-- Shown when a scan matches nothing -->

@@ -17,7 +17,6 @@ const $ = (sel) => document.querySelector(sel);
 
 const el = {
   scan: $("#scan"),
-  scanGo: $("#scan-go"),
   toasts: $("#toasts"),
   printerPill: $("#printer-pill"),
   version: $("#version"),
@@ -27,6 +26,10 @@ const el = {
   sku: $("#item-sku"),
   unit: $("#item-unit"),
   qty: $("#item-qty"),
+  where: $("#item-where"),
+  last: $("#item-last"),
+  lotField: $("#lot-field"),
+  recentCard: $("#recent-card"),
   availability: $("#item-availability"),
   moveQty: $("#move-qty"),
   moveLot: $("#move-lot"),
@@ -225,6 +228,7 @@ function showUnknown(code) {
   suggestedSku = "";
   el.panel.hidden = true;
   el.newPanel.hidden = false;
+  el.recentCard.hidden = true;
   $("#new-title").textContent = "Not in the system yet";
   $("#new-lead").hidden = false;
   el.unknownCode.textContent = code;
@@ -264,7 +268,9 @@ function showItem(item) {
   currentItem = item;
   el.newPanel.hidden = true;
   el.panel.hidden = false;
+  el.recentCard.hidden = true;
   el.preview.hidden = true;
+  setMoveQty(1);
   renderItem(item);
   refocus();
 }
@@ -281,6 +287,12 @@ function renderItem(item) {
   el.sku.textContent = item.sku;
   el.unit.textContent = item.unit;
   el.qty.textContent = fmt(item.qty);
+  const cat = categoriesCache.find((c) => c.id === item.category_id);
+  const loc = locationsCache.find((l) => l.id === item.location_id);
+  el.where.textContent = [cat && cat.name, loc && loc.name].filter(Boolean).join(" · ");
+  const last = item.movements && item.movements[0];
+  el.last.textContent = last
+    ? `Last: ${last.reason} ${fmt(Math.abs(last.delta))} · ${last.created_at}` : "";
   setAvailability(item.availability);
   renderMovements(item.movements);
   renderLots(item.lots, item.unit);
@@ -317,8 +329,9 @@ function renderLots(list, unit) {
       el.lots.appendChild(tr);
     }
   }
-  fillSelect(el.moveLot, (list || []).filter((l) => !l.archived), "(no lot)",
-            (l) => `${l.code} (${fmt(l.qty)})`);
+  const active = (list || []).filter((l) => !l.archived);
+  fillSelect(el.moveLot, active, "(no lot)", (l) => `${l.code} (${fmt(l.qty)})`);
+  el.lotField.hidden = !active.length;   // no lots, no lot picker
 }
 
 function renderMovements(list) {
@@ -343,6 +356,20 @@ function escapeHtml(s) {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
+}
+
+/* ------------------------------------------------------------------ counter
+ * The − / + buttons step the quantity; the action buttons repeat it so the
+ * operator sees exactly what will be booked ("Receive 5 in"). */
+function setMoveQty(n) {
+  el.moveQty.value = fmt(n);
+  syncMoveLabels();
+}
+
+function syncMoveLabels() {
+  const n = parseFloat(el.moveQty.value);
+  const text = Number.isFinite(n) && n > 0 ? fmt(n) : "…";
+  for (const span of el.panel.querySelectorAll("[data-reason] .n")) span.textContent = text;
 }
 
 /* ---------------------------------------------------------------- movements */
@@ -370,6 +397,7 @@ async function move(reason) {
       say(`${reason === "issue" ? "Issued" : "Received"} ${fmt(amount)} ` +
           `${currentItem.unit} of ${currentItem.name}.`);
     }
+    setMoveQty(1);
     await refreshItem();
     await loadItems();
     loadRecent();
@@ -988,7 +1016,6 @@ async function updateNow() {
 el.scan.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); doScan(); }
 });
-el.scanGo.addEventListener("click", doScan);
 $("#btn-new-item").addEventListener("click", showNewItem);
 
 /* A datalist only offers options matching what is already typed, so the
@@ -1005,6 +1032,17 @@ el.newUnit.addEventListener("blur", () => {
   if (!el.newUnit.value.trim()) el.newUnit.value = unitDefault || "pcs";
 });
 
+/* Focus goes straight back to the scan field: a scanner's Enter must never
+   land on a − / + button and press it. */
+for (const btn of el.panel.querySelectorAll("[data-step]")) {
+  btn.addEventListener("click", () => {
+    const n = parseFloat(el.moveQty.value);
+    setMoveQty(Math.max(1, (Number.isFinite(n) ? n : 0) + Number(btn.dataset.step)));
+    refocus();
+  });
+}
+el.moveQty.addEventListener("input", syncMoveLabels);
+
 for (const btn of document.querySelectorAll("[data-reason]")) {
   btn.addEventListener("click", () => move(btn.dataset.reason));
 }
@@ -1012,6 +1050,7 @@ for (const btn of document.querySelectorAll("[data-reason]")) {
 $("#btn-create").addEventListener("click", createItem);
 $("#btn-cancel-create").addEventListener("click", () => {
   el.newPanel.hidden = true;
+  el.recentCard.hidden = !el.panel.hidden;
   refocus();
 });
 $("#btn-restart").addEventListener("click", restartApp);

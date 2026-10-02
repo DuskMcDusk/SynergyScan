@@ -634,14 +634,22 @@ def api_logs(lines: int = Query(200, le=5000)) -> str:
 
 
 # ----------------------------------------------------------------------- UI
+# The page, script and stylesheet change together on every update. Without
+# this the browser may keep a cached app.js next to a new index.html, and the
+# old script then breaks on elements that no longer exist. "no-cache" still
+# lets it reuse its copy, but only after checking it is current.
+FRESH = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB / "index.html")
+    return FileResponse(WEB / "index.html", headers=FRESH)
 
 
 @app.get("/app.js")
 def app_js() -> FileResponse:
-    return FileResponse(WEB / "static" / "app.js", media_type="text/javascript")
+    return FileResponse(WEB / "static" / "app.js", media_type="text/javascript",
+                        headers=FRESH)
 
 
 @app.get("/logo.png")
@@ -656,7 +664,8 @@ def favicon_png() -> FileResponse:
 
 @app.get("/app.css")
 def app_css() -> FileResponse:
-    return FileResponse(WEB / "static" / "app.css", media_type="text/css")
+    return FileResponse(WEB / "static" / "app.css", media_type="text/css",
+                        headers=FRESH)
 
 
 @app.exception_handler(PrinterError)

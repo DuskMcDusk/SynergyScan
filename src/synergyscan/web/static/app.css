@@ -129,10 +129,12 @@ body[data-view="stock"] #nav { display: block; }
 }
 
 
-/* ---------------------------------------------------------------- scan bar */
-#scanbar { display: flex; gap: 8px; margin: 0 0 16px; }
+/* ---------------------------------------------------------------- scan bar
+   On the Scan screen the field is the screen: big, centred, yellow. On Stock
+   and Setup it shrinks back to an ordinary bar above the content. */
+#scanbar { margin: 0 0 16px; }
 #scan {
-  flex: 1; min-width: 0;
+  width: 100%;
   padding: 14px 16px;
   font-size: 1.15rem;
   border: 2px solid var(--brand-yellow);
@@ -140,6 +142,48 @@ body[data-view="stock"] #nav { display: block; }
   background: var(--surface); color: var(--text);
 }
 #scan:focus { outline: 3px solid color-mix(in srgb, var(--brand-yellow) 55%, transparent); outline-offset: 1px; }
+.scan-hint { display: none; margin: 10px 0 0; font-size: 0.9rem; }
+button.linkish {
+  padding: 0; border: 0; background: none; font-size: inherit; font-weight: 600;
+  color: var(--text); text-decoration: underline;
+}
+
+body[data-view="scan"] #scanbar,
+#view-scan { max-width: 760px; margin-left: auto; margin-right: auto; }
+body[data-view="scan"] #scanbar { margin-top: 12px; margin-bottom: 24px; text-align: center; }
+body[data-view="scan"] #scan {
+  padding: 22px; font-size: 1.6rem; text-align: center;
+  border-width: 3px; border-radius: 10px;
+}
+body[data-view="scan"] .scan-hint { display: block; }
+
+/* ------------------------------------------------------- scanned item card */
+.item-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.item-top h2 { margin: 2px 0 6px; font-size: 1.3rem; }
+.item-top .qty-block { text-align: right; }
+.item-top .qty { font-size: 4.5rem; }
+.label { font-family: var(--font-head); font-size: 0.68rem; text-transform: uppercase;
+         letter-spacing: 0.12em; color: var(--muted); }
+#item-where:empty { display: none; }
+
+.stepper { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 28px; }
+.stepper .step { width: 64px; height: 64px; padding: 0; font: 600 2rem/1 var(--font-head); }
+.stepper input {
+  width: 5ch; padding: 4px 0; text-align: center; font: 600 2rem var(--font-head);
+  border: 0; border-bottom: 2px solid var(--border); border-radius: 0; background: transparent;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.lot-field { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
+.lot-field[hidden] { display: none; }
+.lot-field label { font-size: 0.8rem; color: var(--muted); }
+
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+.actions button { padding: 22px; font-size: 1.2rem; }
+#item-last { margin: 10px 0 0; }
+#item-last:empty { display: none; }
 
 /* ----------------------------------------------------------------- pieces */
 .card {
@@ -341,4 +385,7 @@ code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
 @media (max-width: 600px) {
   .row.between { flex-direction: column; }
   .qty-block { text-align: left; }
+  body[data-view="scan"] #scan { padding: 16px; font-size: 1.3rem; }
+  .item-top .qty { font-size: 3.2rem; }
+  .actions button { padding: 18px 10px; font-size: 1.05rem; }
 }
