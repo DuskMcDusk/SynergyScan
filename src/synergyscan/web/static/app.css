@@ -176,14 +176,9 @@ body[data-view="scan"] .scan-hint { display: block; }
 .stepper input::-webkit-outer-spin-button,
 .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-.lot-field { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; }
-.lot-field[hidden] { display: none; }
-.lot-field label { font-size: 0.8rem; color: var(--muted); }
 
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
 .actions button { padding: 22px; font-size: 1.2rem; }
-#item-last { margin: 10px 0 0; }
-#item-last:empty { display: none; }
 
 /* ----------------------------------------------------------------- pieces */
 .card {
@@ -233,6 +228,10 @@ button.primary {
 button.primary:hover { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-soft); }
 button.ok { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
 button.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: var(--danger-bg); }
+.push-right { margin-left: auto; }
+button[hidden] { display: none; }
 
 .qty-block { text-align: right; }
 .qty { font-size: 2.4rem; font-weight: 600; line-height: 1;
@@ -310,6 +309,7 @@ button.tile:hover { border-color: var(--text); border-top-color: var(--brand-yel
 .view > .card:last-child, .view > .tiles:last-child { margin-bottom: 0; }
 .table-scroll { overflow-x: auto; }
 #items td:nth-child(2) { white-space: nowrap; }
+.actions-cell { white-space: nowrap; text-align: right; }
 
 .meter { display: inline-block; vertical-align: middle; width: 90px; height: 6px;
          border-radius: 3px; background: var(--border); overflow: hidden; }
@@ -359,6 +359,7 @@ tbody tr:last-child td { border-bottom: none; }
   image-rendering: pixelated;       /* 203 dpi bars must not be smoothed away */
   max-width: 100%;
 }
+#preview[hidden] { display: none; }
 
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }

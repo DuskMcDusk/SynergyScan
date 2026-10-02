@@ -67,7 +67,7 @@ def schema_version(con: sqlite3.Connection) -> int:
 
 # ------------------------------------------------------------------- items
 ITEM_MASTER_FIELDS = ("category_id", "location_id", "supplier", "lead_time_days",
-                     "low_qty")
+                     "low_qty", "lot")
 
 
 def _check_thresholds(min_qty: float | None, low_qty: float | None) -> None:
@@ -89,17 +89,18 @@ def create_item(con: sqlite3.Connection, sku: str, name: str, **kw: Any) -> int:
     cur = con.execute(
         "INSERT INTO items (sku, name, description, unit, min_qty, barcode, "
         "category_id, location_id, supplier, lead_time_days, "
-        "low_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "low_qty, lot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (sku, name.strip(), kw.get("description"), kw.get("unit", "pcs"),
          kw.get("min_qty", 0), (kw.get("barcode") or None),
          kw.get("category_id"), kw.get("location_id"), kw.get("supplier"),
-         kw.get("lead_time_days"), kw.get("low_qty")),
+         kw.get("lead_time_days"), kw.get("low_qty"),
+         (kw.get("lot") or "").strip() or None),
     )
     return int(cur.lastrowid)
 
 
 def update_item(con: sqlite3.Connection, item_id: int, **kw: Any) -> None:
-    fields = [k for k in ("name", "description", "unit", "min_qty", "barcode",
+    fields = [k for k in ("sku", "name", "description", "unit", "min_qty", "barcode",
                           "archived", *ITEM_MASTER_FIELDS) if k in kw]
     if not fields:
         return
@@ -133,6 +134,27 @@ def find_by_code(con: sqlite3.Connection, code: str) -> sqlite3.Row | None:
         "ORDER BY (barcode = ?) DESC LIMIT 1",
         (code, code, code),
     ).fetchone()
+
+
+def find_archived_by_code(con: sqlite3.Connection, code: str) -> sqlite3.Row | None:
+    """The archived item a scanned code belongs to, so the UI can offer to restore
+    it instead of creating a duplicate."""
+    code = code.strip()
+    if not code:
+        return None
+    return con.execute(
+        "SELECT * FROM items WHERE archived = 1 AND (barcode = ? OR sku = ?) "
+        "ORDER BY (barcode = ?) DESC LIMIT 1",
+        (code, code, code),
+    ).fetchone()
+
+
+def list_archived_items(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    return con.execute(
+        "SELECT i.*, i.id AS item_id, COALESCE(SUM(m.delta), 0) AS qty FROM items i "
+        "LEFT JOIN stock_movements m ON m.item_id = i.id "
+        "WHERE i.archived = 1 GROUP BY i.id ORDER BY i.name"
+    ).fetchall()
 
 
 def list_items(con: sqlite3.Connection, search: str | None = None,
@@ -206,6 +228,19 @@ def update_area(con: sqlite3.Connection, area_id: int, **kw: Any) -> None:
     sets = ", ".join(f"{f} = ?" for f in fields)
     con.execute(f"UPDATE areas SET {sets} WHERE id = ?",
                [*(kw[f] for f in fields), area_id])
+
+
+def set_area_archived(con: sqlite3.Connection, area_id: int, archived: bool) -> None:
+    """Archive an area together with its categories and locations, or restore it
+    together with the ones that were archived along with it. Call inside tx()."""
+    con.execute("UPDATE areas SET archived = ? WHERE id = ?", (int(archived), area_id))
+    for table in ("categories", "locations"):
+        if archived:
+            con.execute(f"UPDATE {table} SET archived = 1, archived_by_area = 1 "
+                        "WHERE area_id = ? AND archived = 0", (area_id,))
+        else:
+            con.execute(f"UPDATE {table} SET archived = 0, archived_by_area = 0 "
+                        "WHERE area_id = ? AND archived_by_area = 1", (area_id,))
 
 
 def get_area(con: sqlite3.Connection, area_id: int) -> sqlite3.Row | None:
@@ -316,7 +351,10 @@ def update_category(con: sqlite3.Connection, category_id: int, **kw: Any) -> Non
         if current is not None and kw["prefix"] != current["prefix"] and con.execute(
                 "SELECT 1 FROM items WHERE category_id = ?", (category_id,)).fetchone():
             raise ValueError("the prefix is locked once the category has items")
-    fields = [k for k in ("area_id", "name", "archived", "prefix") if k in kw]
+    if "archived" in kw:
+        kw["archived_by_area"] = 0        # archived or restored on its own
+    fields = [k for k in ("area_id", "name", "archived", "archived_by_area", "prefix")
+              if k in kw]
     if not fields:
         return
     sets = ", ".join(f"{f} = ?" for f in fields)
@@ -347,16 +385,20 @@ def list_categories(con: sqlite3.Connection, area_id: int | None = None,
 
 
 # --------------------------------------------------------------- locations
-def create_location(con: sqlite3.Connection, code: str, name: str, **kw: Any) -> int:
+def create_location(con: sqlite3.Connection, name: str,
+                    area_id: int | None = None, **kw: Any) -> int:
+    """A location (shelf) belongs to an area; its name is unique within it."""
     cur = con.execute(
-        "INSERT INTO locations (code, name, archived) VALUES (?, ?, ?)",
-        (code.strip(), name.strip(), int(bool(kw.get("archived", 0)))),
+        "INSERT INTO locations (area_id, name, archived) VALUES (?, ?, ?)",
+        (area_id, name.strip(), int(bool(kw.get("archived", 0)))),
     )
     return int(cur.lastrowid)
 
 
 def update_location(con: sqlite3.Connection, location_id: int, **kw: Any) -> None:
-    fields = [k for k in ("code", "name", "archived") if k in kw]
+    if "archived" in kw:
+        kw["archived_by_area"] = 0        # archived or restored on its own
+    fields = [k for k in ("area_id", "name", "archived", "archived_by_area") if k in kw]
     if not fields:
         return
     sets = ", ".join(f"{f} = ?" for f in fields)
@@ -372,7 +414,7 @@ def list_locations(con: sqlite3.Connection, include_archived: bool = False) -> l
     sql = "SELECT * FROM locations"
     if not include_archived:
         sql += " WHERE archived = 0"
-    return con.execute(sql + " ORDER BY code").fetchall()
+    return con.execute(sql + " ORDER BY area_id, name").fetchall()
 
 
 # --------------------------------------------------------------- movements

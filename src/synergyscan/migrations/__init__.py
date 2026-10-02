@@ -78,8 +78,24 @@ def apply_all(con: sqlite3.Connection) -> list[int]:
     sqlite3.executescript commits any open transaction before it starts, so
     wrapping the call in `with con:` would quietly do nothing. Migration files
     must therefore not contain their own BEGIN, COMMIT or ROLLBACK.
+
+    Foreign key enforcement is switched off while a migration runs, because
+    rebuilding a table that other tables reference (drop + rename) is otherwise
+    impossible - and then checked with PRAGMA foreign_key_check before the
+    commit, so a migration that leaves a dangling reference is rolled back.
     """
     _ensure_table(con)
+    fk_was_on = bool(con.execute("PRAGMA foreign_keys").fetchone()[0])
+    if fk_was_on:
+        con.execute("PRAGMA foreign_keys=OFF")     # a no-op inside a transaction
+    try:
+        return _apply_pending(con)
+    finally:
+        if fk_was_on:
+            con.execute("PRAGMA foreign_keys=ON")
+
+
+def _apply_pending(con: sqlite3.Connection) -> list[int]:
     done: list[int] = []
     for num, path in pending(con):
         body = path.read_text(encoding="utf-8")
@@ -94,10 +110,14 @@ def apply_all(con: sqlite3.Connection) -> list[int]:
             f"{body}\n"
             "INSERT INTO schema_migrations (version, name) VALUES "
             f"({num}, '{path.name}');\n"
-            "COMMIT;"
         )
         try:
-            con.executescript(script)
+            con.executescript(script)          # leaves the transaction open
+            broken = con.execute("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise sqlite3.IntegrityError(
+                    f"migration {path.name} left {len(broken)} dangling reference(s)")
+            con.execute("COMMIT")
         except sqlite3.Error:
             log.exception("migration %s failed; rolling back", path.name)
             try:

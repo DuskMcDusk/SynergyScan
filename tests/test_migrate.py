@@ -146,3 +146,53 @@ def test_prune_keeps_the_newest_by_name(isolated_data: Path):
         (d / n).write_bytes(b"x")
     M.prune(d, keep=2)
     assert sorted(p.name for p in d.glob("*.db")) == names[-2:]
+
+
+def test_location_migrations_keep_items_and_movements_attached(tmp_path: Path):
+    """006 and 007 rebuild the locations table; rows that point at it must survive."""
+    con = sqlite3.connect(tmp_path / "old.db", isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY,"
+                " name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))")
+    for num, path in migrations.available():
+        if num <= 5:
+            con.executescript(path.read_text(encoding="utf-8"))
+            con.execute("INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
+                        (num, path.name))
+    con.execute("INSERT INTO locations (code, name) VALUES ('D1', 'Shelf D1')")
+    con.execute("INSERT INTO items (sku, name, location_id) VALUES ('S-1', 'Thing', 1)")
+    con.execute("INSERT INTO stock_movements (item_id, location_id, delta, reason)"
+                " VALUES (1, 1, 7, 'receive')")
+
+    assert migrations.apply_all(con)[:2] == [6, 7]
+
+    loc = con.execute("SELECT * FROM locations").fetchone()
+    assert (loc["id"], loc["name"], loc["area_id"]) == (1, "Shelf D1", None)
+    assert con.execute("SELECT location_id FROM items").fetchone()[0] == 1
+    assert con.execute("SELECT location_id FROM stock_movements").fetchone()[0] == 1
+    assert con.execute("PRAGMA foreign_key_check").fetchall() == []
+    con.close()
+
+
+def test_location_name_migration_disambiguates_clashing_names(tmp_path: Path):
+    """Two shelves in one area that differed only by code keep both, renamed."""
+    con = sqlite3.connect(tmp_path / "old.db", isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY,"
+                " name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))")
+    for num, path in migrations.available():
+        if num <= 6:
+            con.executescript(path.read_text(encoding="utf-8"))
+            con.execute("INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
+                        (num, path.name))
+    con.execute("INSERT INTO areas (name) VALUES ('A')")
+    con.execute("INSERT INTO locations (area_id, code, name) VALUES (1, 'D1', 'Shelf')")
+    con.execute("INSERT INTO locations (area_id, code, name) VALUES (1, 'D2', 'shelf')")
+    con.execute("INSERT INTO locations (area_id, code, name) VALUES (NULL, 'D1', 'Shelf')")
+
+    assert migrations.apply_all(con)[0] == 7
+
+    names = [r[0] for r in con.execute("SELECT name FROM locations ORDER BY id")]
+    assert names == ["Shelf", "shelf (D2)", "Shelf"]
+    con.close()

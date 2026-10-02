@@ -23,6 +23,7 @@
     <!-- Area > Category tree: shown under Stock, only while Stock is open. -->
     <div id="nav" aria-label="Areas and categories"></div>
     <a href="#setup" class="nav-link main" data-view="setup"><span>Setup</span></a>
+    <a href="#archive" class="nav-link main" data-view="archive"><span>Archive</span></a>
   </nav>
   <div class="side-foot">
     <span id="version" class="pill muted"></span>
@@ -61,7 +62,7 @@
         <div id="item-where" class="label"></div>
         <h2 id="item-name">—</h2>
         <span id="item-availability" class="pill"></span>
-        <span class="muted"><span id="item-sku"></span> · <span id="item-unit"></span></span>
+        <span class="muted"><span id="item-sku"></span> · <span id="item-unit"></span><span id="item-lot"></span></span>
       </div>
       <div class="qty-block">
         <div id="item-qty" class="qty">0</div>
@@ -74,92 +75,24 @@
       <input id="move-qty" type="number" step="any" min="0" value="1" aria-label="Quantity">
       <button type="button" class="step" data-step="1" aria-label="One more">+</button>
     </div>
-    <div id="lot-field" class="lot-field" hidden>
-      <label for="move-lot">Lot</label>
-      <select id="move-lot"><option value="">(no lot)</option></select>
-    </div>
     <div class="actions">
       <button class="ok" data-reason="receive">Receive <span class="n">1</span> in</button>
       <button class="warn" data-reason="issue">Issue <span class="n">1</span> out</button>
     </div>
-    <p id="item-last" class="muted small"></p>
-
-    <details class="labels">
-      <summary>Correct the count</summary>
-      <p class="muted small">Sets the on-hand quantity to the number in the counter above.</p>
-      <button data-reason="stocktake" id="btn-stocktake">Set count to <span class="n">1</span></button>
-    </details>
-
-    <details class="labels">
-      <summary>Item details</summary>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="edit-category">Category</label>
-          <select id="edit-category"><option value="">—</option></select>
-        </div>
-        <div class="field">
-          <label for="edit-location">Location</label>
-          <select id="edit-location"><option value="">—</option></select>
-        </div>
-        <div class="field">
-          <label for="edit-supplier">Supplier</label>
-          <input id="edit-supplier" type="text">
-        </div>
-        <div class="field">
-          <label for="edit-lead-time">Lead time (days)</label>
-          <input id="edit-lead-time" type="number" min="0">
-        </div>
-        <div class="field">
-          <label for="edit-low-qty">Low at</label>
-          <input id="edit-low-qty" type="number" step="any" min="0">
-        </div>
-        <button id="btn-save-details" class="primary">Save details</button>
-      </div>
-    </details>
-
-    <details class="labels">
-      <summary>Lots</summary>
-      <table id="item-lots" class="compact"><tbody></tbody></table>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="new-lot-code">Lot code</label>
-          <input id="new-lot-code" type="text" placeholder="e.g. Supplier Lot 4582">
-        </div>
-        <button id="btn-add-lot">Add lot</button>
-      </div>
-    </details>
-
-    <details class="labels">
-      <summary>Print a label</summary>
-      <div class="row wrap gap">
-        <div class="field">
-          <label for="copies">Copies</label>
-          <input id="copies" type="number" min="1" max="50" value="1">
-        </div>
-        <div class="field">
-          <label for="symbology">Code type</label>
-          <select id="symbology">
-            <option value="code128">Code 128</option>
-            <option value="qr">QR code</option>
-            <option value="code39">Code 39</option>
-            <option value="ean13">EAN-13</option>
-          </select>
-        </div>
-        <button id="btn-preview">Preview</button>
-        <button id="btn-print" class="primary">Print</button>
-      </div>
-      <p class="muted small">The preview is rendered by the same code that
-        drives the printer, so it matches what comes out.</p>
-      <img id="preview" alt="Label preview" hidden>
-    </details>
-
-    <details class="labels">
-      <summary>History</summary>
-      <table id="item-movements" class="compact"><tbody></tbody></table>
-    </details>
   </section>
 
   <!-- Shown when a scan matches nothing -->
+  <!-- Shown when a scan matches an archived item: bring it back, don't duplicate it. -->
+  <section id="archived-hit" class="card" hidden>
+    <h2>This item is archived</h2>
+    <p><strong id="archived-hit-name"></strong> <span class="muted" id="archived-hit-sku"></span>
+      was archived. Restore it to use it again.</p>
+    <div class="row gap">
+      <button id="btn-hit-restore" class="primary">Restore item</button>
+      <button id="btn-hit-cancel">Cancel</button>
+    </div>
+  </section>
+
   <section id="new-item-panel" class="card" hidden>
     <h2 id="new-title">Not in the system yet</h2>
     <p id="new-lead">Nothing matches <code id="unknown-code"></code>. Add it?</p>
@@ -182,12 +115,67 @@
         <input id="new-min" type="number" step="any" min="0" value="0">
       </div>
       <div class="field">
+        <label for="new-low">Low at</label>
+        <input id="new-low" type="number" step="any" min="0" placeholder="optional">
+      </div>
+      <div class="field">
+        <label for="new-area">Area</label>
+        <select id="new-area"><option value="">—</option></select>
+      </div>
+      <div class="field">
         <label for="new-category">Category</label>
         <select id="new-category"><option value="">—</option></select>
       </div>
+      <div class="field">
+        <label for="new-location">Location</label>
+        <select id="new-location"><option value="">—</option></select>
+      </div>
+      <div class="field">
+        <label for="new-lot">Lot</label>
+        <input id="new-lot" type="text" placeholder="optional">
+      </div>
+      <div class="field">
+        <label for="new-supplier">Supplier</label>
+        <input id="new-supplier" type="text" placeholder="optional">
+      </div>
+      <div class="field">
+        <label for="new-lead-time">Lead time (days)</label>
+        <input id="new-lead-time" type="number" min="0" placeholder="optional">
+      </div>
+    </div>
+
+    <h3>Label</h3>
+    <div class="row wrap gap">
+      <label class="checkbox"><input id="new-print" type="checkbox" checked>
+        <span id="new-print-text">Print a label when added</span></label>
+      <div class="field">
+        <label for="copies">Copies</label>
+        <input id="copies" type="number" min="1" max="50" value="1">
+      </div>
+      <div class="field">
+        <label for="symbology">Code type</label>
+        <select id="symbology">
+          <option value="code128">Code 128</option>
+          <option value="qr">QR code</option>
+          <option value="code39">Code 39</option>
+          <option value="ean13">EAN-13</option>
+        </select>
+      </div>
+      <button id="btn-preview" type="button">Preview label</button>
+    </div>
+    <img id="preview" alt="Label preview" hidden>
+
+    <div class="row gap" style="margin-top:16px">
       <button id="btn-create" class="primary">Add item</button>
       <button id="btn-cancel-create">Cancel</button>
+      <button id="btn-archive-item" class="danger push-right" hidden>Archive item</button>
     </div>
+  </section>
+
+  <!-- The scanned item's own recent movements: same look as the list below. -->
+  <section id="item-activity" class="card" hidden>
+    <h2>Recent activity</h2>
+    <table id="item-recent" class="compact"><tbody></tbody></table>
   </section>
 
   <section class="card" id="recent-card">
@@ -231,6 +219,23 @@
        are all user-managed here, not fixed in the code. -->
 </div>
 
+<div id="view-archive" class="view" hidden>
+  <section class="card">
+    <h2>Archive</h2>
+    <p class="muted small">Archived things are hidden everywhere else but nothing is
+      deleted: their history stays, and Restore brings them back as they were.
+      Restoring an area also restores the categories and locations archived with it.</p>
+    <h3>Items</h3>
+    <table id="arch-items" class="compact"><tbody></tbody></table>
+    <h3>Areas</h3>
+    <table id="arch-areas" class="compact"><tbody></tbody></table>
+    <h3>Categories</h3>
+    <table id="arch-categories" class="compact"><tbody></tbody></table>
+    <h3>Locations</h3>
+    <table id="arch-locations" class="compact"><tbody></tbody></table>
+  </section>
+</div>
+
 <div id="view-setup" class="view" hidden>
   <section class="card">
     <h2>Areas, categories &amp; locations</h2>
@@ -269,12 +274,12 @@
       <table id="locations" class="compact"><tbody></tbody></table>
       <div class="row wrap gap">
         <div class="field">
-          <label for="new-location-code">Code</label>
-          <input id="new-location-code" type="text" placeholder="e.g. D1">
+          <label for="new-location-area">Area</label>
+          <select id="new-location-area"><option value="">—</option></select>
         </div>
         <div class="field grow">
           <label for="new-location-name">Name</label>
-          <input id="new-location-name" type="text" placeholder="e.g. Shelf D1">
+          <input id="new-location-name" type="text" placeholder="e.g. Shelf 1">
         </div>
         <button id="btn-add-location">Add location</button>
       </div>
