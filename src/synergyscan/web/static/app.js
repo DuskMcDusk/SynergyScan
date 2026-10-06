@@ -261,8 +261,11 @@ function keepArchivedOption(sel, row, labelFn) {
 }
 
 /* --------------------------------------------------------------------- scan */
+/* The scanner types as a US keyboard. With Windows set to the Italian layout
+   its "-" comes out as "'", so ITEM-0001 arrives as ITEM'0001. Codes never
+   contain "'", so turn it back. */
 async function doScan() {
-  const code = el.scan.value.trim();
+  const code = el.scan.value.trim().replace(/'/g, "-");
   if (!code) return;
   try {
     const res = await api("/api/scan", {
@@ -1167,7 +1170,7 @@ let unitDefault = "";
 el.newUnit.addEventListener("focus", () => {
   if (!el.newUnit.value) return;
   unitDefault = el.newUnit.value;
-  el.newUnit.placeholder = unitDefault;
+  el.newUnit.placeholder = "pcs/Kg/L";
   el.newUnit.value = "";
 });
 el.newUnit.addEventListener("blur", () => {
