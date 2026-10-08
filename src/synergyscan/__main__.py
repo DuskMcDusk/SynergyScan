@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(doctor.report_text())
         return 0
 
+    config.ensure_file()
     log.info("starting SynergyScan release %s (log: %s)", relver.current(), log_path)
 
     if not a.no_update:

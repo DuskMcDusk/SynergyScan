@@ -76,21 +76,31 @@ into the box.
 | To do this | Do this |
 |---|---|
 | Look something up | Scan it, or type the SKU and press Enter |
-| Book stock in | Scan, set the quantity, click **Receive in** |
-| Book stock out | Scan, set the quantity, click **Issue out** |
-| Correct a count | Scan, enter the counted number, click **Set count to…** |
-| Print a label | Scan, open **Print a label**, click **Preview** then **Print** |
-| Add a new product | Scan a code the system doesn't know, fill in the name, click **Add item** |
-| See what needs reordering | Tick **Low stock only** |
+| Book stock in | Scan, set the quantity, click **Receive … in** |
+| Book stock out | Scan, set the quantity, click **Issue … out** |
+| Add a new product | Scan a code the system doesn't know (or click **Add a new item**), fill in the form, click **Add item**. A label prints with it unless you untick the box |
+| Print or reprint a label | **Stock** → **Edit** on the item → tick *Print a label after saving*, optionally **Preview label**, then save |
+| Change an item | **Stock** → **Edit** |
+| Browse or search stock | **Stock**: search by name, SKU or barcode, filter by area and category |
+| See what needs reordering | **Stock** → the **to reorder** and **running low** buttons |
+| Add areas, categories, shelves | **Setup** |
+| Hide something without losing it | Archive it; **Archive** lists everything archived and restores it with its history |
 
-The printer indicator at the top right is green when the printer is ready and red
-when it needs something, and it says what.
+Items are organised as **Area › Category › Shelf**. Each area has its own
+categories and shelves, and a new item's SKU is generated from its category's
+prefix (for example `PASTA-0001`) unless you type one. An item has a **reorder**
+level and an optional higher **low** level, which give the three states
+*sufficient*, *running low* and *reorder*.
+
+The printer indicator at the bottom of the left-hand menu is green when the
+printer is ready and red when it needs something, and it says what.
 
 ### Two things worth knowing
 
-**Counts are never overwritten, only adjusted.** When you set a count to 92 and
-the system thought there were 100, it records an adjustment of −8 rather than
-replacing the number. The full history stays, so you can always see what changed
+**Stock is never overwritten, only added to.** Every receipt and issue is a row in
+the history; the figure on hand is the sum. (The API's stocktake call records a
+counted figure as an adjustment, e.g. counting 92 when the system thought 100
+records −8, but the screen has no button for it yet.) The full history stays, so you can always see what changed
 and when. Mistakes are fixed by booking the opposite movement, not by deleting.
 
 **The preview is exactly what prints.** It is produced by the same code that
@@ -100,7 +110,9 @@ the roll.
 ### Using a phone or tablet for stocktaking
 
 By default the app is only reachable from the PC it runs on. To open it up to
-phones and tablets on the same network, edit `C:\SynergyScan\data\config.json`:
+phones and tablets on the same network, edit `C:\SynergyScan\data\config.json`
+(the app creates it with the default settings the first time it starts; on a
+release older than that, create the file yourself):
 
 ```json
 { "allow_lan": true }
@@ -223,7 +235,7 @@ Two rules shape the whole layout:
 | `bootstrap/` | copied to the machine once, at install | launcher, install and rollback scripts |
 | `tools/` | never ships | release building |
 | `channels/` | read by installed machines | which release to run |
-| `tests/` | never ships | 219 tests, none needing hardware |
+| `tests/` | never ships | 308 tests, none needing hardware |
 
 The split is by **lifecycle, not by "is it a script"**. `bootstrap/` holds only
 things that must survive an update; `tools/` only things that run on a developer's
@@ -362,7 +374,7 @@ A healthy `--probe` looks like this:
 ### Tests
 
 ```bash
-uv run pytest                    # 219 tests, ~7s, no hardware needed
+uv run pytest                    # 308 tests, ~12s, no hardware needed
 uv run pytest tests/test_protocol.py -v
 ```
 

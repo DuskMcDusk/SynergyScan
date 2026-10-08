@@ -72,3 +72,27 @@ def save(s: Settings) -> None:
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(p)          # atomic: never leave a half-written config
+
+
+# The keys a person might reasonably edit. channel_url and the update timeouts
+# are left out on purpose: writing them would pin today's defaults into the file
+# and stop a later release from changing them.
+_STARTER_KEYS = ("site_name", "allow_lan", "port")
+
+
+def ensure_file() -> None:
+    """Create config.json with the editable settings if it does not exist.
+
+    Nothing else ever writes this file, so without this a site has nothing to
+    edit. Never overwrites, and never raises: a read-only data directory must
+    not stop the app starting.
+    """
+    p = paths.config_path()
+    if p.exists():
+        return
+    try:
+        defaults = Settings().model_dump()
+        starter = {k: defaults[k] for k in _STARTER_KEYS}
+        p.write_text(json.dumps(starter, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        log.exception("could not create %s", p)
