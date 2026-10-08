@@ -8,11 +8,15 @@ synergyscan.selfupdate instead, where it ships inside a release, is versioned,
 and is covered by tests. Changing this file means touching every installed
 machine by hand.
 
-Two exceptions earn their place, because both handle the case where the app
+Three exceptions earn their place. Two handle the case where the app
 will not start at all - which is exactly when nobody on site can help:
 
 * If current.txt names a release that is missing or has no interpreter, fall
   back to the newest release that does.
+* If SynergyScan is already answering on its port (the shortcut was clicked
+  twice, or the autostart one and the desktop one), open the browser and exit
+  rather than start a second copy that would crash on the busy port and trip
+  the rollback below.
 * If the current release crashes immediately, three times running, roll the
   pointer back to the previous release.
 
@@ -26,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import logging.handlers
 import os
@@ -33,6 +38,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -42,6 +48,7 @@ VERSION_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}-\d+$")
 CRASH_WINDOW_S = 30               # "immediately" means within this many seconds
 CRASH_LIMIT = 3                   # this many fast crashes triggers a rollback
 RESTART_PAUSE_S = 3
+DEFAULT_PORT = 8000
 
 ROOT = Path(__file__).resolve().parent
 VERSIONS = ROOT / "versions"
@@ -134,6 +141,24 @@ def run_once(version: str, extra: list[str]) -> int:
     return subprocess.run(cmd, cwd=VERSIONS / version, env=env).returncode
 
 
+def configured_port() -> int:
+    """The port from data\config.json, or 8000. Never raises."""
+    try:
+        port = int(json.loads((DATA / "config.json").read_text(encoding="utf-8"))["port"])
+        return port if 1 <= port <= 65535 else DEFAULT_PORT
+    except (OSError, ValueError, KeyError, TypeError):
+        return DEFAULT_PORT
+
+
+def already_running(port: int) -> bool:
+    """True if a SynergyScan is answering on this port."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2) as r:
+            return bool(json.loads(r.read()).get("boot"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="launcher.py")
     ap.add_argument("--no-browser", action="store_true")
@@ -143,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
 
     DATA.mkdir(parents=True, exist_ok=True)
     setup_logging()
+
+    port = configured_port()
+    if already_running(port):
+        log.info("SynergyScan is already running on port %d; not starting another", port)
+        if not a.no_browser:
+            webbrowser.open(f"http://127.0.0.1:{port}/")
+        return 0
 
     extra = ["--no-update"] if a.no_update else []
     opened = a.no_browser
@@ -158,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         started = time.monotonic()
         if not opened:
             # Give the server a moment to bind before the browser asks for it.
-            _open_browser_soon()
+            _open_browser_soon(port)
             opened = True
 
         try:
