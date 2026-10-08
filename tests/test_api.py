@@ -564,14 +564,14 @@ def _tree(client):
 
 
 def test_archiving_an_area_archives_its_categories_and_locations(client):
-    a, c1, c2, loc = _tree(client)
+    a, _, _, _ = _tree(client)
     client.patch(f"/api/areas/{a['id']}", json={"archived": True})
     assert client.get("/api/categories").json() == []
     assert client.get("/api/locations").json() == []
 
 
 def test_restoring_an_area_brings_back_only_what_it_archived(client):
-    a, c1, c2, loc = _tree(client)
+    a, _, c2, _ = _tree(client)
     client.patch(f"/api/categories/{c2['id']}", json={"archived": True})   # on its own first
     client.patch(f"/api/areas/{a['id']}", json={"archived": True})
     client.patch(f"/api/areas/{a['id']}", json={"archived": False})
@@ -580,7 +580,7 @@ def test_restoring_an_area_brings_back_only_what_it_archived(client):
 
 
 def test_a_category_cannot_be_restored_while_its_area_is_archived(client):
-    a, c1, c2, loc = _tree(client)
+    a, c1, _, loc = _tree(client)
     client.patch(f"/api/areas/{a['id']}", json={"archived": True})
     assert client.patch(f"/api/categories/{c1['id']}", json={"archived": False}).status_code == 400
     assert client.patch(f"/api/locations/{loc['id']}", json={"archived": False}).status_code == 400

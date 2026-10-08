@@ -28,7 +28,7 @@ from .selfupdate import version as relver
 def _safe(fn: Callable[[], object]) -> object:
     try:
         return fn()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - a support report must never crash
         return f"<failed: {type(e).__name__}: {e}>"
 
 
@@ -80,7 +80,7 @@ def _database(con: sqlite3.Connection | None) -> dict:
         out["counts"] = db.counts(con)
         out["integrity"] = con.execute("PRAGMA integrity_check").fetchone()[0]
         out["journal_mode"] = con.execute("PRAGMA journal_mode").fetchone()[0]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - report the failure, don't raise
         out["error"] = f"{type(e).__name__}: {e}"
     finally:
         if own and con is not None:

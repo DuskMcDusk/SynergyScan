@@ -44,7 +44,7 @@ EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".db", ".db-wal", ".db-shm", ".log"}
 
 def next_version(existing: set[str], on: date | None = None) -> str:
     """Today's date plus the next free sequence number."""
-    d = on or date.today()
+    d = on or date.today()  # noqa: DTZ011 - local date of whoever cuts the release
     prefix = f"{d.year}.{d.month:02d}.{d.day:02d}"
     n = 1
     while f"{prefix}-{n}" in existing:

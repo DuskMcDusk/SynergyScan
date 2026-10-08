@@ -10,9 +10,11 @@ nothing else in the app should construct a UsbPrinter directly.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Callable
+from typing import Self
 
 from . import protocol as P
 from .errors import NOT_FOUND, PrinterError, PrinterNotFound
@@ -57,12 +59,10 @@ class UsbPrinter:
 
     # ------------------------------------------------------------- plumbing
     def close(self) -> None:
-        try:
+        with contextlib.suppress(Exception):      # pragma: no cover - closing a dead handle
             self.dev.close()
-        except Exception:      # pragma: no cover - closing a dead handle
-            pass
 
-    def __enter__(self) -> UsbPrinter:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc) -> None:

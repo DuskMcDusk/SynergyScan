@@ -66,7 +66,7 @@ def has_printer() -> bool:
         import hid
 
         return bool(hid.enumerate(0x1820, 0))
-    except Exception:
+    except Exception:  # noqa: BLE001 - any hid failure means no printer
         return False
 
 

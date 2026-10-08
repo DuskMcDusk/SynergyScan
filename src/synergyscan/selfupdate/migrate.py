@@ -104,7 +104,7 @@ def run() -> dict:
             try:
                 restore(saved, db_path)
                 report["restored"] = True
-            except Exception as re:
+            except Exception as re:  # noqa: BLE001 - any restore failure must be reported
                 # The worst case, and the one that needs a human: say so loudly
                 # and name the file they need.
                 report["restored"] = False

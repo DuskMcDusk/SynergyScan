@@ -66,7 +66,7 @@ def main() -> int:
 
     print(f"SynergyScan on http://{host}:{port}/  (Ctrl+C to stop)")
     try:
-        return subprocess.run(cmd, cwd=ROOT, env=env).returncode
+        return subprocess.run(cmd, cwd=ROOT, env=env, check=False).returncode
     except KeyboardInterrupt:
         return 0
 

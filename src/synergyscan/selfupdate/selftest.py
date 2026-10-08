@@ -124,7 +124,7 @@ def run() -> tuple[bool, dict]:
     for name, fn in CHECKS:
         try:
             report["checks"][name] = {"ok": True, **fn()}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - any check failure is a failed self-test
             report["ok"] = False
             report["checks"][name] = {
                 "ok": False,

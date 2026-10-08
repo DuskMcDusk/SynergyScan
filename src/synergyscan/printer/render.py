@@ -76,7 +76,7 @@ def to_1bit(img: Image.Image, dither: bool = False) -> Image.Image:
 
 
 def dots(mm: float) -> int:
-    return int(round(mm * DOTS_PER_MM))
+    return round(mm * DOTS_PER_MM)
 
 
 # --------------------------------------------------------------------- text

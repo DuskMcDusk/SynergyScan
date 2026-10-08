@@ -138,7 +138,7 @@ def run_once(version: str, extra: list[str]) -> int:
     env["PYTHONIOENCODING"] = "utf-8"
     cmd = [str(py), "-m", "synergyscan", *extra]
     log.info("starting release %s", version)
-    return subprocess.run(cmd, cwd=VERSIONS / version, env=env).returncode
+    return subprocess.run(cmd, cwd=VERSIONS / version, env=env, check=False).returncode
 
 
 def configured_port() -> int:
