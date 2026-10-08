@@ -18,8 +18,8 @@ import os
 import platform
 import sqlite3
 import sys
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from . import config, db, logs, paths
 from .selfupdate import version as relver
@@ -43,8 +43,8 @@ def _versions() -> dict:
         "install_root": str(paths.install_root() or "-"),
         "pointer": str(paths.current_pointer() or "-"),
         "pointer_says": _safe(
-            lambda: (paths.current_pointer().read_text(encoding="utf-8").strip()
-                     if paths.current_pointer() else "-")
+            lambda: (pointer.read_text(encoding="utf-8").strip()
+                     if (pointer := paths.current_pointer()) else "-")
         ),
         "installed_versions": _safe(
             lambda: sorted(d.name for d in (paths.versions_dir() or paths.release_dir())
@@ -60,7 +60,7 @@ def _machine() -> dict:
         "machine": platform.machine(),
         "hostname": platform.node(),
         "user": os.environ.get("USERNAME") or os.environ.get("USER") or "-",
-        "now_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "now_utc": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 

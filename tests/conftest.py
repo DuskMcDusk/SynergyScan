@@ -8,7 +8,6 @@ printer's machine.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -49,7 +48,7 @@ def no_printer(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from synergyscan.printer import transport
 
-    monkeypatch.setattr(transport, "list_devices", lambda: [])
+    monkeypatch.setattr(transport, "list_devices", list)
 
 
 @pytest.fixture

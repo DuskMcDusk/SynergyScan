@@ -93,8 +93,17 @@ select = [
     "YTT303",
 ]
 
+[tool.mypy]
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["qrcode.*", "barcode.*", "hid.*"]
+ignore_missing_imports = true
+
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.1",
+    "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]

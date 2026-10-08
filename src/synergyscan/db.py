@@ -14,9 +14,10 @@ import json
 import re
 import sqlite3
 import unicodedata
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from . import migrations, paths
 
@@ -96,7 +97,7 @@ def create_item(con: sqlite3.Connection, sku: str, name: str, **kw: Any) -> int:
          kw.get("lead_time_days"), kw.get("low_qty"),
          (kw.get("lot") or "").strip() or None),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def update_item(con: sqlite3.Connection, item_id: int, **kw: Any) -> None:
@@ -218,7 +219,7 @@ def create_area(con: sqlite3.Connection, name: str, **kw: Any) -> int:
         "INSERT INTO areas (name, archived) VALUES (?, ?)",
         (name.strip(), int(bool(kw.get("archived", 0)))),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def update_area(con: sqlite3.Connection, area_id: int, **kw: Any) -> None:
@@ -341,7 +342,7 @@ def create_category(con: sqlite3.Connection, area_id: int, name: str, **kw: Any)
         "INSERT INTO categories (area_id, name, archived, prefix) VALUES (?, ?, ?, ?)",
         (area_id, name.strip(), int(bool(kw.get("archived", 0))), prefix),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def update_category(con: sqlite3.Connection, category_id: int, **kw: Any) -> None:
@@ -392,7 +393,7 @@ def create_location(con: sqlite3.Connection, name: str,
         "INSERT INTO locations (area_id, name, archived) VALUES (?, ?, ?)",
         (area_id, name.strip(), int(bool(kw.get("archived", 0)))),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def update_location(con: sqlite3.Connection, location_id: int, **kw: Any) -> None:
@@ -431,7 +432,7 @@ def add_movement(con: sqlite3.Connection, item_id: int, delta: float, reason: st
         "note, actor) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (item_id, location_id, lot_id, delta, reason, note, actor),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def set_stocktake(con: sqlite3.Connection, item_id: int, counted: float,
@@ -476,7 +477,7 @@ def create_lot(con: sqlite3.Connection, item_id: int, code: str, **kw: Any) -> i
         (item_id, code.strip(), kw.get("received_at"), kw.get("expires_at"),
          kw.get("note")),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def update_lot(con: sqlite3.Connection, lot_id: int, **kw: Any) -> None:

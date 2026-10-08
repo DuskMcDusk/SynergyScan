@@ -17,7 +17,6 @@ Two rules drive everything here.
 
 from __future__ import annotations
 
-
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps

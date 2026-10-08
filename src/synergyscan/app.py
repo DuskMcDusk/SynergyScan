@@ -16,9 +16,10 @@ import io
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Iterator, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -326,6 +327,7 @@ def _check_item_refs(con: sqlite3.Connection, category_id: int | None,
     if category_id is not None and location_id is not None:
         cat = db.get_category(con, category_id)
         loc = db.get_location(con, location_id)
+        assert cat is not None and loc is not None  # existence checked above
         if loc["area_id"] is not None and loc["area_id"] != cat["area_id"]:
             raise HTTPException(
                 400, "that location belongs to a different area than the category")
@@ -483,8 +485,9 @@ def api_patch_category(category_id: int, body: CategoryPatch, con: Db) -> dict:
     if "area_id" in fields and db.get_area(con, fields["area_id"]) is None:
         raise HTTPException(404, f"no area with id {fields['area_id']}")
     if fields.get("archived") is False:
-        _check_area_active(con, fields.get("area_id",
-                                          db.get_category(con, category_id)["area_id"]))
+        current = db.get_category(con, category_id)
+        assert current is not None  # existence checked above
+        _check_area_active(con, fields.get("area_id", current["area_id"]))
     if "archived" in fields:
         fields["archived"] = int(bool(fields["archived"]))
     try:
@@ -524,8 +527,9 @@ def api_patch_location(location_id: int, body: LocationPatch, con: Db) -> dict:
     if "area_id" in fields and db.get_area(con, fields["area_id"]) is None:
         raise HTTPException(404, f"no area with id {fields['area_id']}")
     if fields.get("archived") is False:
-        _check_area_active(con, fields.get("area_id",
-                                          db.get_location(con, location_id)["area_id"]))
+        current = db.get_location(con, location_id)
+        assert current is not None  # existence checked above
+        _check_area_active(con, fields.get("area_id", current["area_id"]))
     if "archived" in fields:
         fields["archived"] = int(bool(fields["archived"]))
     try:

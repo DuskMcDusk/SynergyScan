@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from . import protocol as P
 from .errors import NOT_FOUND, PrinterError, PrinterNotFound

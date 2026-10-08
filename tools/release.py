@@ -187,8 +187,8 @@ def main() -> int:
     if not a.publish:
         print(f"  1. gh release create v{version} {archive} "
               f'--title "SynergyScan {version}" --notes "{a.notes or version}"')
-    print(f"  2. Check the archive installs: extract it somewhere and run "
-          f"bootstrap\\install.ps1 -InstallRoot C:\\SynergyScan-test")
+    print("  2. Check the archive installs: extract it somewhere and run "
+          "bootstrap\\install.ps1 -InstallRoot C:\\SynergyScan-test")
     print(f"  3. Only then: git add channels/{a.channel}.json && git commit && git push")
     print("     Machines take the update on their next start. Until you push,")
     print("     nothing has shipped.")

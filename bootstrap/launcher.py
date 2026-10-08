@@ -142,7 +142,7 @@ def run_once(version: str, extra: list[str]) -> int:
 
 
 def configured_port() -> int:
-    """The port from data\config.json, or 8000. Never raises."""
+    r"""The port from data\config.json, or 8000. Never raises."""
     try:
         port = int(json.loads((DATA / "config.json").read_text(encoding="utf-8"))["port"])
         return port if 1 <= port <= 65535 else DEFAULT_PORT
