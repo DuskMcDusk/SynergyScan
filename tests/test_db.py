@@ -559,3 +559,51 @@ def test_classification_codes_lock_once_items_use_them(con):
         with pytest.raises(ValueError, match="locked"):
             db.update_node(con, kind, node, code=code)
     db.update_node(con, "subcategory", tub, code="TBE", name="Tubes")   # same code is fine
+
+
+def test_a_new_subcategory_drops_the_old_family(con):
+    rea, tub = _sub(con, "CH", "REA"), _sub(con, "HY", "TUB")
+    item = db.create_item(con, sku="", name="x", family_id=_family(con, rea, "MN"))
+    db.update_item(con, item, subcategory_id=tub)
+    row = db.get_item(con, item)
+    assert (row["subcategory_id"], row["family_id"]) == (tub, None)
+
+
+def test_clearing_the_subcategory_clears_the_family_too(con):
+    rea = _sub(con, "CH", "REA")
+    item = db.create_item(con, sku="", name="x", family_id=_family(con, rea, "MN"))
+    db.update_item(con, item, subcategory_id=None)
+    row = db.get_item(con, item)
+    assert (row["subcategory_id"], row["family_id"]) == (None, None)
+
+
+def test_the_same_subcategory_keeps_the_family(con):
+    rea = _sub(con, "CH", "REA")
+    mn = _family(con, rea, "MN")
+    item = db.create_item(con, sku="", name="x", family_id=mn)
+    db.update_item(con, item, subcategory_id=rea)
+    assert db.get_item(con, item)["family_id"] == mn
+
+
+def test_a_family_alone_on_edit_implies_its_subcategory(con):
+    rea = _sub(con, "CH", "REA")
+    item = db.create_item(con, sku="", name="x", subcategory_id=_sub(con, "HY", "TUB"))
+    db.update_item(con, item, family_id=_family(con, rea, "SV"))
+    assert db.get_item(con, item)["subcategory_id"] == rea
+
+
+def test_a_location_code_change_only_rewrites_the_positions_below(con):
+    hq = next(f["id"] for f in db.list_nodes(con, "facility") if f["code"] == "HQ")
+    unit = db.create_node(con, "unit", "D", "Drawers", db.create_node(con, "area", "OF", "Office", hq))
+    pos = db.create_node(con, "position", "1.1", "", unit)
+    # Corrupt one stored code elsewhere: a scoped rewrite must leave it alone.
+    other = _pos(con, "RnD-WH-A-0.1")
+    con.execute("UPDATE positions SET location_code = 'STALE' WHERE id = ?", (other,))
+    db.update_node(con, "facility", hq, code="HQX")
+    assert db.get_node(con, "position", pos)["location_code"] == "HQX-OF-D-1.1"
+    assert db.get_node(con, "position", other)["location_code"] == "STALE"
+
+
+def test_filtering_a_top_level_by_parent_is_refused(con):
+    with pytest.raises(ValueError):
+        db.list_nodes(con, "macro", parent_id=1)

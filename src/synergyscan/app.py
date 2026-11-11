@@ -317,14 +317,22 @@ def api_items(con: Db, search: str | None = None,
 ITEM_REFS = {"subcategory_id": "subcategory", "family_id": "family", "position_id": "position"}
 
 
-def _check_item_refs(con: sqlite3.Connection, fields: dict) -> None:
+def _check_item_refs(con: sqlite3.Connection, fields: dict,
+                     current: sqlite3.Row | None = None) -> None:
     """The classification and position are foreign keys; check them explicitly so
     a bad id gets a clean 404 instead of surfacing as a confusing SKU/barcode 409.
-    Whether the family fits the subcategory is db.classify's job (a 400)."""
+    An archived entry cannot be newly chosen, but an item that already uses one
+    may keep it. Whether the family fits the subcategory is db.classify's job."""
     for key, kind in ITEM_REFS.items():
         node_id = fields.get(key)
-        if node_id is not None and db.get_node(con, kind, node_id) is None:
+        if node_id is None:
+            continue
+        node = db.get_node(con, kind, node_id)
+        if node is None:
             raise HTTPException(404, f"no {db.KINDS[kind].label} with id {node_id}")
+        if node["hidden"] and (current is None or current[key] != node_id):
+            raise HTTPException(400, f"that {db.KINDS[kind].label} is archived: "
+                                     "restore it first, or pick another")
 
 
 @app.post("/api/items", status_code=201)
@@ -368,13 +376,14 @@ CLEARABLE_ITEM_FIELDS = {"description", "barcode", "subcategory_id", "family_id"
 def api_patch_item(item_id: int, body: ItemPatch, con: Db) -> dict:
     """Change an item. Moving it is just a new position_id; its code never
     changes unless a new one is asked for by sending a blank sku."""
-    if db.get_item(con, item_id) is None:
+    current = db.get_item(con, item_id)
+    if current is None:
         raise HTTPException(404, f"no item with id {item_id}")
     # A field that is sent as null is a request to clear it - but only for the
     # optional ones; a null name, unit or threshold just means "leave it".
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
               if v is not None or k in CLEARABLE_ITEM_FIELDS}
-    _check_item_refs(con, fields)
+    _check_item_refs(con, fields, current)
     if "archived" in fields:
         fields["archived"] = int(bool(fields["archived"]))
     try:
@@ -430,7 +439,10 @@ def _node_routes(kind: str, plural: str) -> None:
 
     def list_(con: Db, parent_id: int | None = None,
               include_archived: bool = False) -> list[dict]:
-        return rows(db.list_nodes(con, kind, parent_id, include_archived))
+        try:
+            return rows(db.list_nodes(con, kind, parent_id, include_archived))
+        except ValueError as e:          # parent_id on a top level
+            raise HTTPException(400, str(e)) from e
 
     def create(body: NodeIn, con: Db) -> dict:
         if k.parent:

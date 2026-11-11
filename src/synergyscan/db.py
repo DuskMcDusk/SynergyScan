@@ -112,10 +112,17 @@ def update_item(con: sqlite3.Connection, item_id: int, **kw: Any) -> None:
     current = get_item(con, item_id)
     if current is None:
         raise ValueError(f"no item with id {item_id}")
-    if "subcategory_id" in kw or "family_id" in kw:
+    if "subcategory_id" in kw:
+        # The family belongs to the subcategory: a new (or cleared) one sent
+        # without a family drops the old family rather than clashing with it.
+        sub = kw["subcategory_id"]
+        keep = current["family_id"] if sub == current["subcategory_id"] else None
+        kw["subcategory_id"], kw["family_id"] = classify(con, sub, kw.get("family_id", keep))
+    elif "family_id" in kw:           # a family alone implies its subcategory
+        fam = kw["family_id"]
         kw["subcategory_id"], kw["family_id"] = classify(
-            con, kw.get("subcategory_id", current["subcategory_id"]),
-            kw.get("family_id", current["family_id"]))
+            con, None if fam is not None else current["subcategory_id"], fam)
+    if "subcategory_id" in kw:
         fields = list(dict.fromkeys([*fields, "subcategory_id", "family_id"]))
     if "sku" in kw and not kw["sku"].strip():
         kw["sku"] = next_sku(con, kw.get("subcategory_id", current["subcategory_id"]),
@@ -317,6 +324,8 @@ def list_nodes(con: sqlite3.Connection, kind: str, parent_id: int | None = None,
     sql, args = [_node_sql(kind)], []
     where = []
     if parent_id is not None:
+        if not KINDS[kind].parent_col:
+            raise ValueError(f"a {KINDS[kind].label} has no parent to filter by")
         where.append(f"t0.{KINDS[kind].parent_col} = ?")
         args.append(parent_id)
     if not include_archived:
@@ -350,9 +359,10 @@ def create_node(con: sqlite3.Connection, kind: str, code: str, name: str = "",
         vals.append("")              # filled in just below, from the codes up the path
     cur = con.execute(f"INSERT INTO {k.table} ({', '.join(cols)}) "
                       f"VALUES ({', '.join('?' * len(cols))})", vals)
+    node_id = int(cur.lastrowid or 0)
     if kind == "position":
-        _refresh_location_codes(con)
-    return int(cur.lastrowid or 0)
+        _refresh_location_codes(con, kind, node_id)
+    return node_id
 
 
 def update_node(con: sqlite3.Connection, kind: str, node_id: int, **kw: Any) -> None:
@@ -380,7 +390,7 @@ def update_node(con: sqlite3.Connection, kind: str, node_id: int, **kw: Any) -> 
     con.execute(f"UPDATE {k.table} SET {', '.join(f'{f} = ?' for f in fields)} WHERE id = ?",
                 [*(kw[f] for f in fields), node_id])
     if "code" in kw and kind in LOCATION_KINDS:
-        _refresh_location_codes(con)
+        _refresh_location_codes(con, kind, node_id)
 
 
 def items_using(con: sqlite3.Connection, kind: str, node_id: int) -> int:
@@ -394,12 +404,24 @@ def items_using(con: sqlite3.Connection, kind: str, node_id: int) -> int:
     return con.execute(sql, (node_id,)).fetchone()[0]
 
 
-def _refresh_location_codes(con: sqlite3.Connection) -> None:
+# The positions under a location node, as a WHERE clause on positions.
+_POSITIONS_UNDER = {
+    "position": "id = ?",
+    "unit": "unit_id = ?",
+    "area": "unit_id IN (SELECT id FROM storage_units WHERE area_id = ?)",
+    "facility": "unit_id IN (SELECT u.id FROM storage_units u"
+                " JOIN storage_areas a ON a.id = u.area_id WHERE a.facility_id = ?)",
+}
+
+
+def _refresh_location_codes(con: sqlite3.Connection, kind: str, node_id: int) -> None:
+    """Rebuild the stored rack codes of the positions under one location node."""
     con.execute(
         "UPDATE positions SET location_code = ("
         " SELECT f.code || '-' || a.code || '-' || u.code || '-' || positions.code"
         " FROM storage_units u JOIN storage_areas a ON a.id = u.area_id"
-        " JOIN facilities f ON f.id = a.facility_id WHERE u.id = positions.unit_id)")
+        " JOIN facilities f ON f.id = a.facility_id WHERE u.id = positions.unit_id)"
+        f" WHERE {_POSITIONS_UNDER[kind]}", (node_id,))
 
 
 def find_position(con: sqlite3.Connection, code: str) -> sqlite3.Row | None:

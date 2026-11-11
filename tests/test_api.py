@@ -630,3 +630,32 @@ def test_a_code_held_by_an_archived_row_says_so(client):
     client.patch(f"/api/items/{item['id']}", json={"archived": True})
     r = client.post("/api/items", json={"sku": "AR-3", "name": "Y"})
     assert r.status_code == 409 and "archived" in r.json()["detail"]
+
+
+def test_changing_the_subcategory_through_the_api_drops_the_family(client):
+    mn, tub = _node(client, "families", "MN"), _node(client, "subcategories", "TUB")
+    item = client.post("/api/items", json={"name": "x", "family_id": mn["id"]}).json()
+    r = client.patch(f"/api/items/{item['id']}", json={"subcategory_id": tub["id"]})
+    assert r.status_code == 200
+    assert (r.json()["subcategory_id"], r.json()["family_id"]) == (tub["id"], None)
+    r = client.patch(f"/api/items/{item['id']}", json={"subcategory_id": None})
+    assert r.json()["subcategory_id"] is None
+
+
+@pytest.mark.parametrize("plural", ["macros", "facilities"])
+def test_parent_id_on_a_top_level_list_is_a_400(client, plural):
+    assert client.get(f"/api/{plural}?parent_id=1").status_code == 400
+
+
+def test_an_archived_entry_cannot_be_newly_chosen_but_can_be_kept(client):
+    pos = _position(client, "RnD-WH-A-0.1")
+    item = client.post("/api/items", json={"name": "x", "position_id": pos["id"]}).json()
+    client.patch(f"/api/positions/{pos['id']}", json={"archived": True})
+    r = client.post("/api/items", json={"name": "y", "position_id": pos["id"]})
+    assert r.status_code == 400 and "archived" in r.json()["detail"]
+    # Editing the item that already sits there keeps working.
+    r = client.patch(f"/api/items/{item['id']}", json={"name": "x2", "position_id": pos["id"]})
+    assert r.status_code == 200
+    other = client.post("/api/items", json={"name": "z"}).json()
+    r = client.patch(f"/api/items/{other['id']}", json={"position_id": pos["id"]})
+    assert r.status_code == 400
