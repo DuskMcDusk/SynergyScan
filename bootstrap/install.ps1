@@ -280,7 +280,7 @@ Step 'Installing the launcher and helper scripts'
 # means re-running this installer, which is a rare and deliberate act.
 $src = Join-Path $releaseDir 'bootstrap'
 foreach ($f in 'launcher.py', 'rollback.bat', 'rollback.ps1', 'uninstall.ps1',
-               'install.ps1', 'install.bat', 'synergyscan.ico') {
+               'install.ps1', 'install.bat', 'update.bat', 'synergyscan.ico') {
     $p = Join-Path $src $f
     if (Test-Path $p) { Copy-Item $p (Join-Path $InstallRoot $f) -Force }
 }
@@ -341,7 +341,10 @@ if (-not $NoAutostart) {
 
 }   # end of -NoShortcuts
 
-Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+# Only set when a release was downloaded: when this PC kept its release there
+# is no archive, and Remove-Item on $null is a binding error that
+# -ErrorAction does not suppress, which would stop the script right here.
+if ($zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
 
 # ----------------------------------------------------------------- 11. start
 Write-Host ''

@@ -172,3 +172,11 @@ def test_every_bootstrap_script_parses(script):
     r = subprocess.run([POWERSHELL, "-NoProfile", "-Command", cmd],
                        capture_output=True, text=True, timeout=60, check=False)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("script", sorted(p.name for p in ROLLBACK.parent.glob("*.bat")))
+def test_batch_files_have_windows_line_endings(script):
+    """cmd.exe can mis-handle labels and goto in an LF-only .bat (.gitattributes
+    keeps them CRLF in the repo, so GitHub and every release serve them that way)."""
+    data = (ROLLBACK.parent / script).read_bytes()
+    assert b"\n" in data and data.count(b"\n") == data.count(b"\r\n"), script

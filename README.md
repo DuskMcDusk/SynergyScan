@@ -87,6 +87,7 @@ into the box.
 | See what needs reordering | **Stock** → the **to reorder** and **running low** buttons |
 | Add or edit subcategories, families, positions; print rack labels | **Setup** |
 | Hide something without losing it | Archive it; **Archive** lists everything archived and restores it with its history |
+| Update SynergyScan, including the launcher | Double-click **`update.bat`** (in `C:\SynergyScan`, or the copy you were sent), then restart the computer when it asks. Your data is kept |
 
 Items sit in two independent trees, both pre-loaded from the inventory proposal
 and editable in **Setup**:

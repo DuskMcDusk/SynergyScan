@@ -1,0 +1,4 @@
+# Batch files keep CRLF line endings byte for byte, in the repo too: cmd.exe can
+# mis-handle labels and goto in an LF-only file, and a .bat downloaded straight
+# from GitHub (or built into a release elsewhere) would otherwise have them.
+*.bat -text
