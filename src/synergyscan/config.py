@@ -54,7 +54,8 @@ def load() -> Settings:
     raw: dict[str, Any] = {}
     if p.exists():
         try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
+            # utf-8-sig: Notepad and PowerShell 5.1 may save it with a BOM.
+            raw = json.loads(p.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             # A corrupt config must not stop the app starting: a site that
             # cannot open the app cannot ship anything.
@@ -96,3 +97,47 @@ def ensure_file() -> None:
         p.write_text(json.dumps(starter, indent=2) + "\n", encoding="utf-8")
     except OSError:
         log.exception("could not create %s", p)
+
+
+def set_value(key: str, value: Any) -> None:
+    """Set one key in config.json, or remove it when value is None, leaving the
+    rest exactly as written. Unlike save(), this does not pin every default into
+    the file. Raises on an unreadable file: the caller reports it."""
+    ensure_file()
+    p = paths.config_path()
+    raw = json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {}
+    if value is None:
+        raw.pop(key, None)
+    else:
+        raw[key] = value
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """For install.ps1, which cannot write JSON PowerShell 5.1 would not spoil:
+
+        python -m synergyscan.config set channel_url https://...
+        python -m synergyscan.config unset channel_url
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="python -m synergyscan.config")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("set")
+    s.add_argument("key", choices=sorted(Settings.model_fields))
+    s.add_argument("value")
+    u = sub.add_parser("unset")
+    u.add_argument("key", choices=sorted(Settings.model_fields))
+    a = ap.parse_args(argv)
+    try:
+        set_value(a.key, a.value if a.cmd == "set" else None)
+    except (OSError, ValueError) as e:
+        print(f"could not update {paths.config_path()}: {e}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

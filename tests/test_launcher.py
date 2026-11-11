@@ -116,3 +116,53 @@ def test_rollback_script_survives_a_junk_pointer(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert (tmp_path / "current.txt").read_text().strip() == "2026.10.02-1"
     assert not (tmp_path / "data" / "blocked_versions.txt").exists()
+
+
+# ------------------------------------------------------- shutdown vs crashes
+def run_loop(monkeypatch, tmp_path, codes):
+    """Drive launcher.main with run_once returning `codes` in turn."""
+    monkeypatch.setattr(launcher, "DATA", tmp_path / "data")
+    monkeypatch.setattr(launcher, "setup_logging", lambda: None)
+    monkeypatch.setattr(launcher, "already_running", lambda port: False)
+    monkeypatch.setattr(launcher, "resolve", lambda: "2026.10.08-2")
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
+    rollbacks = []
+    monkeypatch.setattr(launcher, "rollback", lambda v: rollbacks.append(v) or None)
+    it = iter(codes)
+    monkeypatch.setattr(launcher, "run_once", lambda v, extra: next(it))
+    return launcher.main(["--no-browser"]), rollbacks
+
+
+@pytest.mark.parametrize("code", [0x40010004, 0xC000013A, 0xC000026B])
+def test_windows_ending_the_session_is_not_a_crash(monkeypatch, tmp_path, code):
+    """What happened on a real PC: shutdown killed the app, the restarts failed
+    while Windows logged off, and the launcher rolled back a working release."""
+    result, rollbacks = run_loop(monkeypatch, tmp_path, [code])
+    assert result == 0
+    assert rollbacks == []
+
+
+def test_real_fast_crashes_still_roll_back(monkeypatch, tmp_path):
+    result, rollbacks = run_loop(monkeypatch, tmp_path, [1, 1, 1])
+    assert rollbacks == ["2026.10.08-2"]
+    assert result == 1                     # no earlier release in this stub
+
+
+def test_configured_port_reads_a_config_saved_with_a_bom(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "DATA", tmp_path)
+    (tmp_path / "config.json").write_bytes(b'\xef\xbb\xbf{"port": 8123}')
+    assert launcher.configured_port() == 8123
+
+
+@needs_powershell
+@pytest.mark.parametrize("script", sorted(p.name for p in ROLLBACK.parent.glob("*.ps1")))
+def test_every_bootstrap_script_parses(script):
+    """install.ps1 downloads things, so it cannot run here - but a syntax error in
+    it would only show up on a customer PC. PowerShell's own parser checks it."""
+    path = ROLLBACK.parent / script
+    cmd = ("$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+           f"'{path}', [ref]$null, [ref]$e); $e | ForEach-Object {{ $_.ToString() }}; "
+           "exit $e.Count")
+    r = subprocess.run([POWERSHELL, "-NoProfile", "-Command", cmd],
+                       capture_output=True, text=True, timeout=60, check=False)
+    assert r.returncode == 0, r.stdout + r.stderr

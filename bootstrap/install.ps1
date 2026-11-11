@@ -188,6 +188,27 @@ Step 'Activating this release'
 Set-Content -Path (Join-Path $InstallRoot 'current.txt') -Value $version -Encoding ascii
 Good "current.txt now reads $version"
 
+# ------------------------------------------------------------ 8b. channel
+# Recorded in data\config.json, or a machine installed with -Channel beta would
+# take this one release from beta and then quietly follow stable again. Only an
+# explicit -Channel changes it, so re-running the installer without one leaves
+# a canary a canary. stable is the default, so it is recorded by removing the
+# key rather than by pinning today's URL. The release writes the file (plain
+# UTF-8, other keys kept); PowerShell 5.1 would add a BOM.
+if ($PSBoundParameters.ContainsKey('Channel')) {
+    Step "Following the $Channel channel"
+    if ($Channel -eq 'stable') {
+        & $venvPy -m synergyscan.config unset channel_url
+    } else {
+        & $venvPy -m synergyscan.config set channel_url $ChannelUrl
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Say "Could not record the channel. Set channel_url in data\config.json by hand."
+    } else {
+        Good "updates now come from $Channel"
+    }
+}
+
 # ------------------------------------------------------------- 9. bootstrap
 Step 'Installing the launcher and helper scripts'
 # These are copied OUT of the release on purpose. They live outside versions\

@@ -34,15 +34,30 @@ nobody ever saw it.
 
 ## Canary
 
-`beta.json` exists so one machine can lead. Point it at the new release, leave
-`stable.json` alone, and set that machine's `config.json`:
+`beta.json` exists so one machine can lead. Point it at the new release
+(`python tools/release.py --channel beta`), leave `stable.json` alone, and make
+that machine follow beta. Either run the installer on it with the channel,
+which installs from beta and records it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Channel beta
+```
+
+or add this key to its `data\config.json` by hand and restart the app:
 
 ```json
-{ "channel_url": "https://raw.githubusercontent.com/DuskMcDusk/SynergyScan/main/channels/beta.json" }
+"channel_url": "https://raw.githubusercontent.com/DuskMcDusk/SynergyScan/main/channels/beta.json"
 ```
+
+`-Channel stable` puts it back. Re-running the installer *without* `-Channel`
+leaves the machine on whichever channel it follows.
 
 Let it run a few days of real work, then copy the same values into
 `stable.json`.
+
+Updates never replace `launcher.py` or `rollback.ps1` (they live outside
+`versions\` on purpose), so a change to either only reaches a machine when the
+installer is run on it again. Do that on the canary first, too.
 
 ## Rolling back a bad release
 
