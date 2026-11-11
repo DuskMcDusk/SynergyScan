@@ -133,13 +133,19 @@ def run_loop(monkeypatch, tmp_path, codes):
     return launcher.main(["--no-browser"]), rollbacks
 
 
-@pytest.mark.parametrize("code", [0x40010004, 0xC000013A, 0xC000026B])
+@pytest.mark.parametrize("code", [0x40010004, 0xC000026B])
 def test_windows_ending_the_session_is_not_a_crash(monkeypatch, tmp_path, code):
     """What happened on a real PC: shutdown killed the app, the restarts failed
     while Windows logged off, and the launcher rolled back a working release."""
     result, rollbacks = run_loop(monkeypatch, tmp_path, [code])
     assert result == 0
     assert rollbacks == []
+
+
+def test_a_stray_ctrl_c_is_restarted_not_left_down(monkeypatch, tmp_path):
+    """STATUS_CONTROL_C_EXIT with the launcher still alive: start the app again."""
+    result, rollbacks = run_loop(monkeypatch, tmp_path, [0xC000013A, 0])
+    assert (result, rollbacks) == (0, [])        # restarted once, then a clean stop
 
 
 def test_real_fast_crashes_still_roll_back(monkeypatch, tmp_path):

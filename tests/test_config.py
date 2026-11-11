@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from synergyscan import config, paths
 
 
@@ -49,5 +51,34 @@ def test_the_installer_command_sets_and_unsets_the_channel(capsys):
     assert config.main(["unset", "channel_url"]) == 0
     assert config.load().channel_url == config.DEFAULT_CHANNEL_URL
     paths.config_path().write_text("{not json", encoding="utf-8")
-    assert config.main(["set", "channel_url", "x"]) == 1      # reported, not a traceback
+    assert config.main(["set", "channel_url", "https://example.invalid/b.json"]) == 1  # reported
+    assert "could not update" in capsys.readouterr().out
+
+
+def test_a_bad_hand_edited_value_does_not_stop_the_app_or_lose_the_rest():
+    paths.config_path().write_text('{"port": "8000x", "allow_lan": true}', encoding="utf-8")
+    s = config.load()
+    assert (s.port, s.allow_lan) == (8000, True)          # only the bad one is dropped
+
+
+def test_a_config_that_is_not_an_object_falls_back_to_defaults():
+    for body in ("[]", "null", '"text"'):
+        paths.config_path().write_text(body, encoding="utf-8")
+        assert config.load().port == 8000
+
+
+def test_set_value_refuses_to_write_an_invalid_config():
+    paths.config_path().write_text('{"port": 8123}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        config.set_value("density", 99)                    # out of range
+    assert json.loads(paths.config_path().read_text(encoding="utf-8")) == {"port": 8123}
+
+
+def test_the_installer_command_only_touches_the_channel(capsys):
+    with pytest.raises(SystemExit):
+        config.main(["set", "port", "abc"])                # not offered at all
+    assert config.main(["set", "channel_url", "http://plain.invalid/x.json"]) == 1
+    for body in ("[]", "null"):
+        paths.config_path().write_text(body, encoding="utf-8")
+        assert config.main(["set", "channel_url", "https://example.invalid/b.json"]) == 1
     assert "could not update" in capsys.readouterr().out

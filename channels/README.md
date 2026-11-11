@@ -49,8 +49,14 @@ or add this key to its `data\config.json` by hand and restart the app:
 "channel_url": "https://raw.githubusercontent.com/DuskMcDusk/SynergyScan/main/channels/beta.json"
 ```
 
-`-Channel stable` puts it back. Re-running the installer *without* `-Channel`
-leaves the machine on whichever channel it follows.
+`-Channel stable` puts it back on stable. Re-running the installer *without*
+`-Channel` keeps the machine on whichever channel it follows.
+
+The installer never moves a machine backwards. If it already runs the
+channel's release or a newer one (a canary switched back to stable is usually
+ahead of stable), it keeps that release and only refreshes the launcher and
+helper scripts; the machine moves on when its channel next passes it. Going
+back to an older release is `rollback.bat`, never the installer.
 
 Let it run a few days of real work, then copy the same values into
 `stable.json`.

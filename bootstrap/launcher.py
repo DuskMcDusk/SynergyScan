@@ -19,8 +19,8 @@ will not start at all - which is exactly when nobody on site can help:
   the rollback below.
 * If the current release crashes immediately, three times running, roll the
   pointer back to the previous release - unless it was Windows ending the
-  session (shutdown, log-off, console closed), which is not a crash: then the
-  launcher stops too, and the Startup shortcut brings it back at next log-on.
+  session (shutdown, log-off), which is not a crash: then the launcher stops
+  too, and the Startup shortcut brings it back at next log-on.
 
 Standard library only, and no imports from synergyscan: this has to keep working
 when the release it points at is broken.
@@ -54,12 +54,13 @@ RESTART_PAUSE_S = 3
 DEFAULT_PORT = 8000
 
 # Exit codes that mean Windows is ending the session, not that the release is
-# broken. At shutdown or log-off the app is terminated (DBG_TERMINATE_PROCESS),
-# closing its console ends it with STATUS_CONTROL_C_EXIT, and while a log-off
-# is in progress a new process cannot even initialise its DLLs
-# (STATUS_DLL_INIT_FAILED_LOGOFF). Restarting into that and counting the
-# failures once made a PC roll back a release that was fine.
-SESSION_ENDING_CODES = {0x40010004, 0xC000013A, 0xC000026B}
+# broken: at shutdown or log-off the app is terminated (DBG_TERMINATE_PROCESS),
+# and while a log-off is in progress a new process cannot even initialise its
+# DLLs (STATUS_DLL_INIT_FAILED_LOGOFF). Restarting into that and counting the
+# failures once made a PC roll back a release that was fine. A closed console
+# (STATUS_CONTROL_C_EXIT) is deliberately not here: it takes the launcher down
+# with it anyway, and a stray Ctrl+C must not keep the app down all day.
+SESSION_ENDING_CODES = {0x40010004, 0xC000026B}
 
 ROOT = Path(__file__).resolve().parent
 VERSIONS = ROOT / "versions"
