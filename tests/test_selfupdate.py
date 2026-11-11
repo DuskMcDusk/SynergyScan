@@ -482,3 +482,105 @@ def test_restart_exit_code_matches_the_launcher():
     launcher = (Path(__file__).resolve().parents[1] / "bootstrap" / "launcher.py")
     m = re.search(r"RESTART_EXIT_CODE\s*=\s*(\d+)", launcher.read_text(encoding="utf-8"))
     assert m and int(m.group(1)) == SU.RESTART_EXIT_CODE
+
+
+def running(monkeypatch, release: str) -> None:
+    """Pretend `release` is running. Only the no-argument call means that;
+    with a directory, version.current reads an unpacked release."""
+    real = A.version.current
+    monkeypatch.setattr(A.version, "current", lambda *a: real(*a) if a else release)
+
+
+def test_an_installed_release_waiting_for_its_restart_counts_as_installed(
+        tmp_path, install, monkeypatch):
+    """The pointer already names it but the app has not restarted into it yet:
+    there is nothing to install, only the restart, so it is not a failure."""
+    stub_gates(monkeypatch)
+    running(monkeypatch, "2026.09.01-1")                # still the old one
+    live = install["versions"] / "2026.09.25-1"
+    (live / "keep.txt").write_text("x", encoding="utf-8")
+    A.venv_python(live).parent.mkdir(parents=True)
+    A.venv_python(live).touch()
+    rel = release_for(tmp_path, "2026.09.25-1")
+    applied = A.apply_release(rel, install_root=install["root"],
+                              versions_dir=install["versions"],
+                              staging=install["staging"], pointer=install["pointer"])
+    assert applied.version == "2026.09.25-1"
+    assert (live / "keep.txt").exists()                # not reinstalled
+
+
+def test_a_broken_pointed_at_release_that_is_not_running_is_reinstalled(
+        tmp_path, install, monkeypatch):
+    """--force can repair it: nothing runs from that directory, so replacing it is safe."""
+    stub_gates(monkeypatch)
+    running(monkeypatch, "2026.09.01-1")
+    rel = release_for(tmp_path, "2026.09.25-1")        # no venv in the fixture's release
+    applied = A.apply_release(rel, install_root=install["root"],
+                              versions_dir=install["versions"],
+                              staging=install["staging"], pointer=install["pointer"])
+    assert applied.version == "2026.09.25-1"
+
+
+def test_apply_main_reports_a_refusal_without_a_traceback(monkeypatch, capsys):
+    from synergyscan.selfupdate import check as C_mod
+
+    monkeypatch.setattr("sys.argv", ["apply", "--force"])
+    monkeypatch.setattr(C_mod, "fetch_channel", lambda url, timeout=15.0: C.Release(
+        version="2026.09.25-1", url="https://x/y.zip", sha256="a" * 64))
+
+    def refuse(rel, download_timeout=120.0):
+        raise A.ApplyError("release 2026.09.25-1 is already the running release")
+
+    monkeypatch.setattr(A, "apply_from_paths", refuse)
+    assert A.main() == 1
+    assert "already the running release" in capsys.readouterr().err
+
+
+def test_apply_refuses_the_running_release_even_if_the_pointer_differs(
+        tmp_path, install, monkeypatch):
+    stub_gates(monkeypatch)
+    monkeypatch.setattr(A.version, "current", lambda *a: "2026.10.02-1")
+    rel = release_for(tmp_path, "2026.10.02-1")
+    with pytest.raises(A.ApplyError, match="already"):
+        A.apply_release(rel, install_root=install["root"],
+                        versions_dir=install["versions"],
+                        staging=install["staging"], pointer=install["pointer"])
+
+
+def test_blocked_versions_are_not_offered(tmp_path, monkeypatch, isolated_data):
+    monkeypatch.setattr(C, "fetch_channel", lambda url, timeout=15.0: C.Release(
+        version="2026.12.01-1", url="https://x/y.zip", sha256="a" * 64))
+    assert C.available("https://x/s.json", "2026.10.01-1") is not None
+    (isolated_data / "blocked_versions.txt").write_bytes(b"\xef\xbb\xbf2026.12.01-1\r\n")
+    assert C.available("https://x/s.json", "2026.10.01-1") is None
+
+
+def test_a_corrupt_blocklist_does_not_break_the_update_check(isolated_data):
+    (isolated_data / "blocked_versions.txt").write_bytes(b"\xff\xfe\x00bad")
+    assert C.blocked_versions() == set()
+
+
+def test_a_crash_loop_block_expires_but_a_manual_one_does_not(isolated_data):
+    from datetime import UTC, datetime
+
+    lines = [
+        "2026.11.01-1 2026-11-12T10:00:00Z",   # launcher, crash loop: expires
+        "2026.10.01-1",                        # rollback.ps1, by hand: holds
+        "2026.09.01-1 not-a-date",             # unreadable expiry: holds
+    ]
+    (isolated_data / "blocked_versions.txt").write_text("\n".join(lines), encoding="utf-8")
+    before = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
+    after = datetime(2026, 11, 12, 11, 0, tzinfo=UTC)
+    assert C.blocked_versions(before) == {"2026.11.01-1", "2026.10.01-1", "2026.09.01-1"}
+    assert C.blocked_versions(after) == {"2026.10.01-1", "2026.09.01-1"}
+
+
+def test_the_blocklist_file_name_is_the_same_everywhere():
+    """launcher.py and rollback.ps1 cannot import synergyscan.paths, so a rename
+    in one place would silently stop the block from working."""
+    from synergyscan import paths
+
+    boot = Path(__file__).resolve().parents[1] / "bootstrap"
+    for name in ("launcher.py", "rollback.ps1"):
+        text = (boot / name).read_text(encoding="utf-8")
+        assert f"'{paths.BLOCKED_VERSIONS}'" in text or f'"{paths.BLOCKED_VERSIONS}"' in text, name

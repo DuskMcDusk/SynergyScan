@@ -198,6 +198,53 @@ def test_location_name_migration_disambiguates_clashing_names(tmp_path: Path):
     con.close()
 
 
+def test_restore_refuses_a_missing_backup_instead_of_wiping_the_database(seeded: Path):
+    """A plain sqlite3.connect would create an empty file and restore that."""
+    with pytest.raises(FileNotFoundError):
+        M.restore(seeded.with_name("gone.db"), seeded)
+    con = db.connect(seeded)
+    try:
+        assert {r[0] for r in con.execute("SELECT name FROM items")} == {"Thing"}
+    finally:
+        con.close()
+
+
+def test_restore_refuses_a_damaged_backup(seeded: Path, tmp_path: Path):
+    junk = tmp_path / "junk.db"
+    junk.write_bytes(b"not a database at all" * 100)
+    with pytest.raises(sqlite3.DatabaseError):
+        M.restore(junk, seeded)
+
+
+def test_restore_repairs_a_corrupt_live_database(seeded: Path):
+    """When SQLite cannot open the live file, the backup is copied over it."""
+    saved = M.backup(seeded, paths.backups_dir())
+    seeded.write_bytes(b"garbage" * 1000)
+    M.restore(saved, seeded)
+    con = db.connect(seeded)
+    try:
+        assert {r[0] for r in con.execute("SELECT name FROM items")} == {"Thing"}
+    finally:
+        con.close()
+
+
+def test_a_missing_backup_is_reported_as_not_restored(seeded: Path, monkeypatch):
+    def explode(con):
+        raise sqlite3.OperationalError("migration blew up")
+
+    real_backup = M.backup
+
+    def backup_then_lose_it(*a, **k):
+        p = real_backup(*a, **k)
+        p.unlink()                       # quarantined, cleaned up, ...
+        return p
+
+    monkeypatch.setattr(migrations, "apply_all", explode)
+    monkeypatch.setattr(M, "backup", backup_then_lose_it)
+    report = M.run()
+    assert report["ok"] is False and report["restored"] is False
+
+
 def test_the_new_trees_install_over_an_existing_database(tmp_path: Path):
     """An installed machine at 008, with the old Area > Category tree, a shelf and
     an item in use: 009 adds the new lists and leaves all of that as it was."""

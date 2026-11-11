@@ -268,6 +268,16 @@ def apply_release(rel: Release, *, install_root: Path, versions_dir: Path,
                   download_timeout: float = 120.0) -> Applied:
     """Install `rel` and move the pointer. Raises ApplyError without doing so."""
     target = versions_dir / rel.version
+    if rel.version == version.current():
+        # Replacing it would delete the release that is running right now.
+        raise ApplyError(f"release {rel.version} is already the running release")
+    if rel.version == read_pointer(pointer) and venv_python(target).exists():
+        # Installed by an earlier run that has not restarted into it yet: the
+        # restart is all that is left to do, so report it as installed.
+        log.info("release %s is already installed; it starts on the next restart",
+                 rel.version)
+        return Applied(version=rel.version, release_dir=target,
+                       selftest="already installed", migrate="already installed")
     if target.exists():
         # A previous attempt got this far and then failed. Start clean.
         log.warning("release directory %s already exists; replacing it", target)
@@ -333,7 +343,11 @@ def main() -> int:
     if rel is None:
         print("already up to date")
         return 0
-    applied = apply_from_paths(rel, download_timeout=s.update_timeout_s)
+    try:
+        applied = apply_from_paths(rel, download_timeout=s.update_timeout_s)
+    except ApplyError as e:
+        print(f"not installed: {e}", file=sys.stderr)
+        return 1
     print(f"installed {applied.version}")
     return 0
 

@@ -20,6 +20,7 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from . import version
 
@@ -89,6 +90,42 @@ def _validate(data: object) -> Release:
                    min_version=str(mv) if mv else None)
 
 
+def blocked_versions(now: datetime | None = None) -> set[str]:
+    """Releases not to reinstall (data\\blocked_versions.txt), one per line.
+
+    Without this, a rolled-back release would see the same version in the
+    channel, reinstall it and crash again, forever. A line is either a bare
+    version, which rollback.ps1 writes when a person goes back on purpose and
+    which holds until a newer release ships, or "<version> <UTC expiry>", which
+    the launcher writes after a crash loop: that cause may have been the machine
+    (a busy port, a locked file) rather than the release, so it gets another try
+    once the block expires. An unreadable expiry counts as no expiry. Never raises.
+    """
+    try:
+        from .. import paths
+        # utf-8-sig: PowerShell 5.1 (rollback.ps1) writes a BOM.
+        text = paths.blocked_versions_path().read_text(encoding="utf-8-sig")
+    except (OSError, ValueError):
+        return set()
+    now = now or datetime.now(UTC)
+    out = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if len(parts) > 1:
+            try:
+                until = datetime.fromisoformat(parts[1])
+                if until.tzinfo is None:
+                    until = until.replace(tzinfo=UTC)
+                if until <= now:
+                    continue
+            except ValueError:
+                pass
+        out.add(parts[0])
+    return out
+
+
 def available(channel_url: str, current_version: str | None = None,
               timeout: float = 15.0) -> Release | None:
     """The release to install, or None if there is nothing to do.
@@ -101,6 +138,11 @@ def available(channel_url: str, current_version: str | None = None,
         rel = fetch_channel(channel_url, timeout=timeout)
     except CheckError as e:
         log.info("update check skipped: %s", e)
+        return None
+
+    if rel.version in blocked_versions():
+        log.warning("release %s crashed on this machine and was rolled back; "
+                    "not reinstalling it", rel.version)
         return None
 
     try:
