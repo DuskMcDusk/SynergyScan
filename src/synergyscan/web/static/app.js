@@ -26,15 +26,18 @@ const el = {
   sku: $("#item-sku"),
   unit: $("#item-unit"),
   qty: $("#item-qty"),
-  shelf: $("#item-shelf"),
-  shelfRow: $("#item-shelf-row"),
+  location: $("#item-location"),
+  locationRow: $("#item-location-row"),
   lotRow: $("#item-lot-row"),
-  setupAreas: $("#setup-areas"),
+  techRow: $("#item-tech-row"),
+  tech: $("#item-tech"),
   where: $("#item-where"),
   lot: $("#item-lot"),
   activity: $("#item-activity"),
   itemRecent: $("#item-recent tbody"),
   recentCard: $("#recent-card"),
+  archivedHit: $("#archived-hit"),
+  positionPanel: $("#position-panel"),
   availability: $("#item-availability"),
   moveQty: $("#move-qty"),
   newPanel: $("#new-item-panel"),
@@ -43,12 +46,17 @@ const el = {
   newSku: $("#new-sku"),
   newUnit: $("#new-unit"),
   newMin: $("#new-min"),
-  newArea: $("#new-area"),
-  newCategory: $("#new-category"),
+  newMacro: $("#new-macro"),
+  newSub: $("#new-sub"),
+  newFamily: $("#new-family"),
+  newFacility: $("#new-facility"),
+  newLArea: $("#new-larea"),
+  newSUnit: $("#new-sunit"),
+  newPosition: $("#new-position"),
   newLow: $("#new-low"),
-  newLocation: $("#new-location"),
   newSupplier: $("#new-supplier"),
   newLot: $("#new-lot"),
+  newTechRef: $("#new-tech-ref"),
   newLeadTime: $("#new-lead-time"),
   newPrint: $("#new-print"),
   preview: $("#preview"),
@@ -58,8 +66,11 @@ const el = {
   items: $("#items tbody"),
   itemsEmpty: $("#items-empty"),
   search: $("#search"),
-  filterArea: $("#filter-area"),
-  filterCategory: $("#filter-category"),
+  filterMacro: $("#filter-macro"),
+  filterSub: $("#filter-sub"),
+  filterFacility: $("#filter-facility"),
+  filterLArea: $("#filter-larea"),
+  filterSUnit: $("#filter-sunit"),
 
   nav: $("#nav"),
   recent: $("#recent tbody"),
@@ -68,21 +79,84 @@ const el = {
   countReorder: $("#count-reorder"),
   countLow: $("#count-low"),
 
-  newAreaName: $("#new-area-name"),
+  setupClasses: $("#setup-classes"),
+  setupLocations: $("#setup-locations"),
 };
 
 let currentItem = null;
-/* *Cache: the active rows, offered in lists and forms. all*: active and
-   archived, used only to show a name - an item can still point at an archived
-   category or shelf, and that must not turn into a blank. */
-let areasCache = [];
-let categoriesCache = [];
-let locationsCache = [];
-let allAreas = [];
-let allCategories = [];
-let allLocations = [];
 let availFilter = "";  // "", "reorder" or "low": set by the summary tiles
 let allItems = [];   // unfiltered list: feeds the sidebar counts and the summary tiles
+
+/* ------------------------------------------------------------------- trees
+ * Two independent trees, each loaded whole (they are small): the
+ * classification, which makes an item's code, and the locations, where it is
+ * kept. tree[kind] holds every row, archived ones too, because an item can
+ * still point at an archived entry and that must not turn into a blank.
+ * `hidden` is set by the server when a row or any row above it is archived;
+ * activeNodes() is what forms and lists offer. */
+const KINDS = {
+  macro: { plural: "macros", parent: null, label: "macro-category",
+           code: "2 letters, e.g. EL" },
+  subcategory: { plural: "subcategories", parent: "macro", label: "subcategory", many: "subcategories",
+                 code: "3 letters, e.g. DDC", note: "Examples" },
+  family: { plural: "families", parent: "subcategory", label: "item family", many: "item families",
+            code: "2 letters, e.g. MN", note: "Examples" },
+  facility: { plural: "facilities", parent: null, label: "facility",
+              code: "2–3 letters, e.g. RnD" },
+  area: { plural: "areas", parent: "facility", label: "area", many: "areas",
+          code: "2–3 letters or digits, e.g. WH" },
+  unit: { plural: "units", parent: "area", label: "storage unit", many: "storage units",
+          code: "1–3 letters or digits, e.g. A" },
+  position: { plural: "positions", parent: "unit", label: "position", many: "positions", noName: true,
+              code: "level.position, e.g. 0.1 (level 0 is the bottom shelf)", note: "Contents" },
+};
+const CHILD = { macro: "subcategory", subcategory: "family", facility: "area", area: "unit", unit: "position" };
+const CLASS_KINDS = ["macro", "subcategory", "family"];
+const LOCATION_KINDS = ["facility", "area", "unit", "position"];
+
+const tree = Object.fromEntries(Object.keys(KINDS).map((k) => [k, []]));
+
+const nodeOf = (kind, id) => (id == null ? null : tree[kind].find((n) => n.id === id) || null);
+const activeNodes = (kind, parentId) =>
+  tree[kind].filter((n) => !n.hidden && (parentId === undefined || n.parent_id === parentId));
+const nodeLabel = (kind, n) => (KINDS[kind].noName ? n.code : `${n.code} · ${n.name}`);
+
+/* The node and the nodes above it, root first: [[kind, row], ...]. */
+function pathOf(kind, id) {
+  const out = [];
+  let k = kind;
+  let n = nodeOf(kind, id);
+  while (n) {
+    out.unshift([k, n]);
+    k = KINDS[k].parent;
+    n = k ? nodeOf(k, n.parent_id) : null;
+  }
+  return out;
+}
+
+/* An item's classification path: down to its family if it has one. */
+const classPath = (item) =>
+  item.family_id ? pathOf("family", item.family_id) : pathOf("subcategory", item.subcategory_id);
+
+/* What a row is called on its own: CH-REA-MN, RnD-WH-A-0.1. */
+function fullCode(kind, id) {
+  if (kind === "position") return (nodeOf("position", id) || {}).location_code || "";
+  return pathOf(kind, id).map(([, n]) => n.code).join("-");
+}
+
+async function loadTrees() {
+  try {
+    const lists = await Promise.all(Object.values(KINDS).map(
+      (k) => api(`/api/${k.plural}?include_archived=true`)));
+    Object.keys(KINDS).forEach((k, i) => { tree[k] = lists[i]; });
+  } catch (e) {
+    say(e.message, "error");
+    return;
+  }
+  for (const chain of [FORM_CLASS, FORM_LOCATION, FILTER_CLASS, FILTER_LOCATION]) fillChain(chain);
+  renderNav();
+  renderSetup();
+}
 
 /* ------------------------------------------------------------------ helpers */
 async function api(path, options = {}) {
@@ -133,6 +207,8 @@ function refocus() {
 }
 
 const fmt = (n) => (Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : "—");
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const attr = (s) => escapeHtml(String(s)).replace(/"/g, "&quot;");
 
 /* Repopulates a <select> from a list of {id, ...}, keeping the previous
    selection if it still exists among the new options. */
@@ -152,38 +228,64 @@ function fillSelect(sel, list, placeholder, labelFn) {
   sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "";
 }
 
-/* A shelf only has meaning inside its area ("Shelf 1" exists in every area), so
-   it is always shown with its area. */
-function locLabel(l) {
-  const area = allAreas.find((a) => a.id === l.area_id);
-  return `${area ? area.name + " / " : ""}${l.name}`;
+/* ----------------------------------------------------------------- cascades
+ * A cascade is one <select> per level of a tree, each offering the children
+ * of the one before it - so a subcategory is always picked inside its
+ * macro-category and a position inside its storage unit. The item form and
+ * the Stock filters each have one per tree. */
+const FORM_CLASS = [["macro", el.newMacro, "—"], ["subcategory", el.newSub, "—"],
+                    ["family", el.newFamily, "None"]];
+const FORM_LOCATION = [["facility", el.newFacility, "—"], ["area", el.newLArea, "—"],
+                       ["unit", el.newSUnit, "—"], ["position", el.newPosition, "—"]];
+const FILTER_CLASS = [["macro", el.filterMacro, "All macro-categories"],
+                      ["subcategory", el.filterSub, "All subcategories"]];
+const FILTER_LOCATION = [["facility", el.filterFacility, "All facilities"],
+                         ["area", el.filterLArea, "All areas"],
+                         ["unit", el.filterSUnit, "All units"]];
+
+const chainValue = (chain, i) => parseInt(chain[i][1].value, 10) || null;
+
+function fillLevel(chain, i) {
+  const [kind, sel, placeholder] = chain[i];
+  const parent = i ? chainValue(chain, i - 1) : null;
+  const list = i === 0 ? activeNodes(kind) : parent ? activeNodes(kind, parent) : [];
+  fillSelect(sel, list, placeholder, (n) => nodeLabel(kind, n));
+  sel.disabled = i > 0 && !list.length;
 }
 
-/* The shelves offered when creating an item: those of the chosen category's
-   area (plus any not yet assigned to an area), or all of them with no category. */
-const newFormArea = () => parseInt(el.newArea.value, 10) || null;
-
-function fillNewLocation() {
-  const area = newFormArea();
-  const list = locationsCache.filter((l) => !area || l.area_id === area || l.area_id === null);
-  fillSelect(el.newLocation, list, "—", area ? (l) => l.name : locLabel);
+/* Refill every level from `from` down, e.g. after the level above changed. */
+function fillChain(chain, from = 0) {
+  for (let i = from; i < chain.length; i++) fillLevel(chain, i);
 }
 
-/* The item form is area-first: the area decides which categories and which
-   shelves are offered. With no area picked, everything is offered and picking a
-   category fills the area in. */
-function fillNewCategory() {
-  const area = newFormArea();
-  const list = categoriesCache.filter((c) => !area || c.area_id === area);
-  fillSelect(el.newCategory, list, "—",
-             area ? (c) => c.name : (c) => `${areaName(c.area_id)} / ${c.name}`);
+/* Select a node and its ancestors. An archived one is not among the options,
+   so it is added marked "(archived)" and saving the form keeps it. */
+function setChain(chain, kind, id) {
+  const path = pathOf(kind, id);
+  chain.forEach(([k, sel], i) => {
+    fillLevel(chain, i);
+    const hit = path.find(([pk]) => pk === k);
+    keepArchivedOption(sel, hit ? hit[1] : null, (n) => nodeLabel(k, n));
+    if (hit) sel.disabled = false;
+  });
+}
+
+function keepArchivedOption(sel, row, labelFn) {
+  if (!row) { sel.value = ""; return; }
+  sel.value = String(row.id);
+  if (sel.value === String(row.id)) return;
+  const opt = document.createElement("option");
+  opt.value = row.id;
+  opt.textContent = `${labelFn(row)} (archived)`;
+  sel.appendChild(opt);
+  sel.value = String(row.id);
 }
 
 /* -------------------------------------------------------------------- views
- * Three screens, one at a time: Scan (the item in hand), Stock (the list) and
- * Setup. The scan field stays on every screen; a successful scan or an Open
- * click always lands on Scan, where the item is. The URL hash records the
- * screen so reload and back/forward work. */
+ * Four screens, one at a time: Scan (the item in hand), Stock (the list),
+ * Setup and Archive. The scan field stays on every screen; a successful scan
+ * or an Open click always lands on Scan, where the item is. The URL hash
+ * records the screen so reload and back/forward work. */
 const VIEWS = ["scan", "stock", "setup", "archive"];
 let view = "scan";
 
@@ -202,6 +304,15 @@ function showView(name) {
 }
 
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+
+/* The Scan screen shows one thing at a time in place of the recent activity:
+   an item, the add/edit form, a rack position, or an archived item. */
+function showScanPanel(...panels) {
+  for (const p of [el.panel, el.activity, el.newPanel, el.archivedHit, el.positionPanel,
+                   el.recentCard]) {
+    p.hidden = !panels.includes(p);
+  }
+}
 
 /* Movement times arrive as "2026-10-02 15:11:07" (server local time). Today's
    show just the time; older ones the day and month. */
@@ -247,19 +358,6 @@ async function loadRecent() {
   }
 }
 
-/* Select `row` in `sel`; if it is archived (so not among the options), add it
-   as an extra option marked "(archived)" so saving the form keeps it. */
-function keepArchivedOption(sel, row, labelFn) {
-  if (!row) { sel.value = ""; return; }
-  sel.value = String(row.id);
-  if (sel.value === String(row.id)) return;
-  const opt = document.createElement("option");
-  opt.value = row.id;
-  opt.textContent = `${labelFn(row)} (archived)`;
-  sel.appendChild(opt);
-  sel.value = String(row.id);
-}
-
 /* --------------------------------------------------------------------- scan */
 /* The scanner types as a US keyboard. With Windows set to the Italian layout
    its "-" comes out as "'", so ITEM-0001 arrives as ITEM'0001. Codes never
@@ -274,6 +372,17 @@ async function doScan() {
     });
     if (res.found) {
       showItem(await api(`/api/items/${res.item.id}`));
+    } else if (res.position) {
+      // A rack label: it fills in the location of the item being added or
+      // edited, moves the item on screen there, or else shows what is kept there.
+      if (!el.newPanel.hidden) {
+        setChain(FORM_LOCATION, "position", res.position.id);
+        say(`Location set to ${res.position.location_code}.`);
+      } else if (currentItem && !el.panel.hidden) {
+        await moveItem(res.position);
+      } else {
+        showPosition(res.position);
+      }
     } else if (res.archived_item) {
       showArchivedHit(res.archived_item);
     } else {
@@ -285,25 +394,61 @@ async function doScan() {
   el.scan.value = "";
 }
 
+/* Moving changes the position only; the item keeps its code and its label. */
+async function moveItem(pos) {
+  if (currentItem.position_id === pos.id) {
+    say(`${currentItem.name} is already at ${pos.location_code}.`);
+    return;
+  }
+  const was = nodeOf("position", currentItem.position_id);
+  await api(`/api/items/${currentItem.id}`, {
+    method: "PATCH", body: JSON.stringify({ position_id: pos.id }),
+  });
+  say(`Moved ${currentItem.name} to ${pos.location_code}` +
+      (was ? ` (was ${was.location_code}).` : "."));
+  await refreshItem();
+  await loadItems();
+}
+
+let shownPosition = null;
+
+async function showPosition(pos) {
+  showView("scan");
+  currentItem = null;
+  shownPosition = pos;
+  showScanPanel(el.positionPanel);
+  $("#pos-code").textContent = pos.location_code;
+  $("#pos-where").textContent = pathOf("position", pos.id).slice(0, -1)
+    .map(([, n]) => n.name).join(" › ");
+  $("#pos-note").textContent = pos.note ? `Listed here: ${pos.note}` : "";
+  const tbody = $("#pos-items tbody");
+  tbody.innerHTML = "";
+  let list = [];
+  try { list = await api(`/api/items?position_id=${pos.id}`); } catch (e) { say(e.message, "error"); }
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td class="muted">No items recorded at this position yet.</td></tr>';
+  }
+  for (const it of list) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td><strong>${escapeHtml(it.name)}</strong><span class="sku">${escapeHtml(it.sku)}</span></td>` +
+      `<td class="num">${fmt(it.qty)} ${escapeHtml(it.unit)}</td>` +
+      `<td class="actions-cell"><button class="ghost" data-open="${it.item_id}">Open</button></td>`;
+    tbody.appendChild(tr);
+  }
+  refocus();
+}
+
 let archivedHit = null;
 
 function showArchivedHit(item) {
   showView("scan");
   currentItem = null;
   archivedHit = item;
-  el.panel.hidden = true;
-  el.activity.hidden = true;
-  el.newPanel.hidden = true;
-  el.recentCard.hidden = true;
-  $("#archived-hit").hidden = false;
+  showScanPanel(el.archivedHit);
   $("#archived-hit-name").textContent = item.name;
   $("#archived-hit-sku").textContent = item.sku;
   refocus();
-}
-
-function hideArchivedHit() {
-  archivedHit = null;
-  $("#archived-hit").hidden = true;
 }
 
 let scannedCode = "";
@@ -312,7 +457,7 @@ let editingId = null;   // set while the form edits an existing item instead of 
 
 function showUnknown(code) {
   showView("scan");
-  hideArchivedHit();
+  archivedHit = null;
   $("#btn-archive-item").hidden = true;
   currentItem = null;
   editingId = null;
@@ -321,22 +466,18 @@ function showUnknown(code) {
   $("#new-print-text").textContent = "Print a label when added";
   scannedCode = code;
   suggestedSku = "";
-  el.panel.hidden = true;
-  el.activity.hidden = true;
-  el.newPanel.hidden = false;
-  el.recentCard.hidden = true;
+  showScanPanel(el.newPanel);
   $("#new-title").textContent = "Not in the system yet";
   $("#new-lead").hidden = false;
   el.unknownCode.textContent = code;
   el.newSku.value = "";
+  el.newSku.placeholder = "Generated";
   el.newName.value = "";
-  el.newArea.value = "";
-  fillNewCategory();
-  fillNewLocation();
-  el.newCategory.value = "";
-  el.newLocation.value = "";
+  setChain(FORM_CLASS, "subcategory", null);
+  setChain(FORM_LOCATION, "position", null);
   el.newSupplier.value = "";
   el.newLot.value = "";
+  el.newTechRef.value = "";
   el.newLeadTime.value = "";
   el.newLow.value = "";
   el.preview.hidden = true;
@@ -345,7 +486,7 @@ function showUnknown(code) {
 }
 
 /* The "Add" button: the same form, opened by hand with no scanned code. The
-   SKU is suggested straight away since there is no scan to fall back on. */
+   code is suggested straight away since there is no scan to fall back on. */
 function showNewItem() {
   showUnknown("");
   $("#new-title").textContent = "New item";
@@ -353,16 +494,20 @@ function showNewItem() {
   prefillSku();
 }
 
-/* Picking a category fills the SKU with the one the server would generate, so
-   it can be seen (and overridden) before saving. A SKU the user has typed over
-   is left alone. */
+/* Picking a subcategory (and family) fills the code with the one the server
+   would generate, so it can be seen (and overridden) before saving. A code the
+   user has typed over is left alone. */
 async function prefillSku() {
-  if (editingId) return;      // an existing item keeps its SKU unless it is typed over
+  if (editingId) return;      // an existing item keeps its code unless it is typed over
   const typed = el.newSku.value.trim();
   if (typed && typed !== suggestedSku && typed !== scannedCode) return;
-  const cat = el.newCategory.value;
+  const params = new URLSearchParams();
+  const sub = chainValue(FORM_CLASS, 1);
+  const fam = chainValue(FORM_CLASS, 2);
+  if (sub) params.set("subcategory_id", sub);
+  if (fam) params.set("family_id", fam);
   try {
-    const r = await api("/api/next-sku" + (cat ? `?category_id=${cat}` : ""));
+    const r = await api(`/api/next-sku?${params}`);
     suggestedSku = r.sku;
     el.newSku.value = r.sku;
   } catch { /* the field stays as it was; the server generates one on save */ }
@@ -372,12 +517,9 @@ async function prefillSku() {
    movements and lots all in one call. */
 function showItem(item) {
   showView("scan");
-  hideArchivedHit();
+  archivedHit = null;
   currentItem = item;
-  el.newPanel.hidden = true;
-  el.panel.hidden = false;
-  el.activity.hidden = false;
-  el.recentCard.hidden = true;
+  showScanPanel(el.panel, el.activity);
   setMoveQty(1);
   renderItem(item);
   refocus();
@@ -396,14 +538,14 @@ function renderItem(item) {
   el.unit.textContent = item.unit;
   el.lot.textContent = item.lot || "";
   el.lotRow.hidden = !item.lot;
+  el.tech.textContent = item.tech_ref || "";
+  el.techRow.hidden = !item.tech_ref;
   el.qty.textContent = fmt(item.qty);
-  const cat = allCategories.find((c) => c.id === item.category_id);
-  const loc = allLocations.find((l) => l.id === item.location_id);
-  // Area › Category above the name; the shelf sits with the other facts.
-  const areaId = (cat && cat.area_id) || (loc && loc.area_id);
-  el.where.textContent = [areaId && areaName(areaId), cat && cat.name].filter(Boolean).join(" › ");
-  el.shelf.textContent = loc ? loc.name : "";
-  el.shelfRow.hidden = !loc;
+  // Macro › Subcategory › Family above the name; the location sits with the other facts.
+  el.where.textContent = classPath(item).map(([, n]) => n.name).join(" › ");
+  const pos = nodeOf("position", item.position_id);
+  el.location.textContent = pos ? pos.location_code : "";
+  el.locationRow.hidden = !pos;
   renderItemActivity(item.movements);
   setAvailability(item.availability);
 }
@@ -479,8 +621,11 @@ async function move(reason) {
 async function loadItems() {
   const params = new URLSearchParams();
   if (el.search.value.trim()) params.set("search", el.search.value.trim());
-  if (el.filterArea.value) params.set("area_id", el.filterArea.value);
-  if (el.filterCategory.value) params.set("category_id", el.filterCategory.value);
+  const filters = [[FILTER_CLASS, ["macro_id", "subcategory_id"]],
+                   [FILTER_LOCATION, ["facility_id", "area_id", "unit_id"]]];
+  for (const [chain, keys] of filters) {
+    keys.forEach((key, i) => { const v = chainValue(chain, i); if (v) params.set(key, v); });
+  }
   let list = [];
   try {
     list = await api(`/api/items?${params}`);
@@ -499,11 +644,11 @@ async function loadItems() {
     if (it.availability === "reorder" || it.availability === "low") {
       tr.className = it.availability;
     }
-    const cat = allCategories.find((c) => c.id === it.category_id);
-    const loc = allLocations.find((l) => l.id === it.location_id);
-    const where = cat || loc
-      ? `${cat ? escapeHtml(cat.name) : '<span class="muted">No category</span>'}` +
-        (loc ? `<span>${escapeHtml(locLabel(loc))}</span>` : "")
+    // Subcategory › family; the macro-category is in the sidebar already.
+    const cls = classPath(it).slice(1).map(([, n]) => n.name).join(" › ");
+    const where = cls || it.location_code
+      ? `${cls ? escapeHtml(cls) : '<span class="muted">Not classified</span>'}` +
+        (it.location_code ? `<span class="loc">${escapeHtml(it.location_code)}</span>` : "")
       : '<span class="muted">Not set</span>';
     tr.innerHTML =
       `<td class="item-cell"><strong>${escapeHtml(it.name)}</strong><span>${escapeHtml(it.sku)}</span></td>` +
@@ -535,7 +680,7 @@ async function refreshStats() {
   el.countReorder.textContent = allItems.filter((i) => i.availability === "reorder").length;
   el.countLow.textContent = allItems.filter((i) => i.availability === "low").length;
   renderNav();
-  renderSetup();       // its per-area item counts come from this list
+  renderSetup();       // its item counts come from this list
   renderUnitOptions();
 }
 
@@ -552,61 +697,65 @@ function renderUnitOptions() {
     seen.set(key, entry);
   }
   const units = [...seen.values()].sort((a, b) => b.n - a.n).map((e) => e.unit);
-  $("#unit-options").innerHTML = units
-    .map((u) => `<option value="${escapeHtml(u).replace(/"/g, "&quot;")}"></option>`)
-    .join("");
+  $("#unit-options").innerHTML = units.map((u) => `<option value="${attr(u)}"></option>`).join("");
 }
 
-/* Area > Category tree. Each link just sets the two filter selects, so the
-   selects remain the single source of truth for what the list shows. */
-function renderNav() {
-  const catArea = new Map(categoriesCache.map((c) => [c.id, c.area_id]));
-  const perCat = new Map();
-  const perArea = new Map();
+/* How many active items sit under each node, keyed "kind:id". */
+function itemCounts() {
+  const counts = new Map();
+  const bump = (kind, id) => counts.set(`${kind}:${id}`, (counts.get(`${kind}:${id}`) || 0) + 1);
   for (const it of allItems) {
-    if (it.category_id == null) continue;
-    perCat.set(it.category_id, (perCat.get(it.category_id) || 0) + 1);
-    const a = catArea.get(it.category_id);
-    perArea.set(a, (perArea.get(a) || 0) + 1);
+    for (const [k, n] of classPath(it)) bump(k, n.id);
+    for (const [k, n] of pathOf("position", it.position_id)) bump(k, n.id);
   }
-  const area = el.filterArea.value;
-  const cat = el.filterCategory.value;
+  return counts;
+}
+
+/* Macro-category > Subcategory tree. Each link just sets the two filter
+   selects, so the selects remain the single source of truth for what the list
+   shows. Only subcategories that hold something are listed: 56 links, most of
+   them empty, would bury the ones that matter. */
+function renderNav() {
+  const counts = itemCounts();
+  const n = (kind, id) => counts.get(`${kind}:${id}`) || 0;
+  const macro = el.filterMacro.value;
+  const sub = el.filterSub.value;
   const link = (cls, label, count, attrs, on) =>
     `<a href="#" class="nav-link ${cls}${on ? " on" : ""}" ${attrs}>` +
     `<span>${escapeHtml(label)}</span><span class="count">${count}</span></a>`;
-  let html = link("", "All stock", allItems.length, 'data-area="" data-category=""',
-                  !area && !cat);
-  for (const a of areasCache) {
-    const areaOn = String(a.id) === area && !cat;
-    const cats = categoriesCache.filter((x) => x.area_id === a.id);
-    const closed = collapsedAreas.has(a.id);
-    const chevron = cats.length
+  let html = link("", "All stock", allItems.length, 'data-macro="" data-sub=""', !macro && !sub);
+  for (const m of activeNodes("macro")) {
+    const subs = activeNodes("subcategory", m.id)
+      .filter((s) => n("subcategory", s.id) || String(s.id) === sub);
+    const closed = collapsedMacros.has(m.id);
+    const chevron = subs.length
       ? `<button type="button" class="nav-toggle${closed ? " closed" : ""}" ` +
-        `data-toggle-area="${a.id}" aria-expanded="${!closed}" ` +
-        `aria-label="${closed ? "Expand" : "Collapse"} ${escapeHtml(a.name)}"></button>`
+        `data-toggle-macro="${m.id}" aria-expanded="${!closed}" ` +
+        `aria-label="${closed ? "Expand" : "Collapse"} ${attr(m.name)}"></button>`
       : `<span class="nav-toggle-gap"></span>`;
     html += `<div class="nav-area">${chevron}` +
-            link("", a.name, perArea.get(a.id) || 0,
-                 `data-area="${a.id}" data-category=""`, areaOn) + `</div>`;
+            link("", m.name, n("macro", m.id), `data-macro="${m.id}" data-sub=""`,
+                 String(m.id) === macro && !sub) + `</div>`;
     if (closed) continue;
-    for (const c of cats) {
-      html += link("sub", c.name, perCat.get(c.id) || 0,
-                   `data-area="${a.id}" data-category="${c.id}"`, String(c.id) === cat);
+    for (const s of subs) {
+      html += link("sub", s.name, n("subcategory", s.id),
+                   `data-macro="${m.id}" data-sub="${s.id}"`, String(s.id) === sub);
     }
   }
   el.nav.innerHTML = html;
 }
 
-/* Areas the user has folded shut in the sidebar; remembered across reloads. */
-const collapsedAreas = new Set();
+/* Macro-categories the user has folded shut in the sidebar; remembered across reloads. */
+const collapsedMacros = new Set();
 try {
-  for (const id of JSON.parse(localStorage.getItem("collapsedAreas") || "[]")) {
-    collapsedAreas.add(id);
+  for (const id of JSON.parse(localStorage.getItem("collapsedMacros") || "[]")) {
+    collapsedMacros.add(id);
   }
 } catch { /* storage unavailable: start expanded */ }
 
 /* Edit: the same form as creating, filled from the item. The scanned-code line
-   is replaced by a heading and the SKU stays as it is unless it is typed over. */
+   is replaced by a heading and the code stays as it is unless it is typed
+   over - or cleared, which asks for a new one from the classification. */
 async function showEdit(id) {
   let item;
   try {
@@ -626,51 +775,49 @@ async function showEdit(id) {
   $("#new-print-text").textContent = "Print a label after saving";
   el.newName.value = item.name;
   el.newSku.value = item.sku;
+  el.newSku.placeholder = "Cleared: a new code is made from the classification";
   el.newUnit.value = item.unit;
   el.newMin.value = fmt(item.min_qty);
   el.newLow.value = item.low_qty ?? "";
-  const cat = allCategories.find((c) => c.id === item.category_id);
-  const loc = allLocations.find((l) => l.id === item.location_id);
-  const area = (cat && cat.area_id) || (loc && loc.area_id) || "";
-  el.newArea.value = area;
-  if (area && el.newArea.value !== String(area)) {
-    keepArchivedOption(el.newArea, allAreas.find((a) => a.id === area), (a) => a.name);
-  }
-  fillNewCategory();
-  keepArchivedOption(el.newCategory, cat, (c) => c.name);
-  fillNewLocation();
-  keepArchivedOption(el.newLocation, loc, (l) => l.name);
+  if (item.family_id) setChain(FORM_CLASS, "family", item.family_id);
+  else setChain(FORM_CLASS, "subcategory", item.subcategory_id);
+  setChain(FORM_LOCATION, "position", item.position_id);
   $("#btn-archive-item").hidden = false;
   el.newLot.value = item.lot || "";
+  el.newTechRef.value = item.tech_ref || "";
   el.newSupplier.value = item.supplier || "";
   el.newLeadTime.value = item.lead_time_days ?? "";
 }
 
-async function saveEdit() {
-  const name = el.newName.value.trim();
-  const sku = el.newSku.value.trim();
-  if (!name || !sku) {
-    say("An item needs a name and a SKU.", "error");
-    return;
-  }
-  const body = {
-    sku,
-    name,
+/* The fields both creating and editing send. */
+function itemFormBody() {
+  return {
+    name: el.newName.value.trim(),
     unit: el.newUnit.value.trim() || "pcs",
     min_qty: parseFloat(el.newMin.value) || 0,
-    category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
-    location_id: el.newLocation.value ? parseInt(el.newLocation.value, 10) : null,
+    subcategory_id: chainValue(FORM_CLASS, 1),
+    family_id: chainValue(FORM_CLASS, 2),
+    position_id: chainValue(FORM_LOCATION, 3),
     supplier: el.newSupplier.value.trim() || null,
     lot: el.newLot.value.trim() || null,
+    tech_ref: el.newTechRef.value.trim() || null,
     lead_time_days: el.newLeadTime.value ? parseInt(el.newLeadTime.value, 10) : null,
     low_qty: el.newLow.value ? parseFloat(el.newLow.value) : null,
   };
+}
+
+async function saveEdit() {
+  const body = { sku: el.newSku.value.trim(), ...itemFormBody() };
+  if (!body.name) {
+    say("An item needs a name.", "error");
+    return;
+  }
   try {
     const item = await api(`/api/items/${editingId}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    say(`Saved ${item.name}.`);
+    say(body.sku ? `Saved ${item.name}.` : `Saved ${item.name} with the new code ${item.sku}.`);
     if (el.newPrint.checked) await printLabel(item.id);
     editingId = null;
     el.newPanel.hidden = true;
@@ -683,19 +830,9 @@ async function saveEdit() {
 
 async function createItem() {
   if (editingId) return saveEdit();
-  const body = {
-    sku: el.newSku.value.trim() === suggestedSku ? "" : el.newSku.value.trim(),
-    name: el.newName.value.trim(),
-    unit: el.newUnit.value.trim() || "pcs",
-    min_qty: parseFloat(el.newMin.value) || 0,
-    category_id: el.newCategory.value ? parseInt(el.newCategory.value, 10) : null,
-    location_id: el.newLocation.value ? parseInt(el.newLocation.value, 10) : null,
-    supplier: el.newSupplier.value.trim() || null,
-    lot: el.newLot.value.trim() || null,
-    lead_time_days: el.newLeadTime.value ? parseInt(el.newLeadTime.value, 10) : null,
-    low_qty: el.newLow.value ? parseFloat(el.newLow.value) : null,
-  };
-  /* The scanned label keeps working when the SKU differs from it. */
+  const typed = el.newSku.value.trim();
+  const body = { sku: typed === suggestedSku ? "" : typed, ...itemFormBody() };
+  /* The scanned label keeps working when the code differs from it. */
   const finalSku = body.sku || suggestedSku;
   if (scannedCode && scannedCode.toLowerCase() !== finalSku.toLowerCase()) {
     body.barcode = scannedCode;
@@ -709,7 +846,7 @@ async function createItem() {
       method: "POST",
       body: JSON.stringify(body),
     });
-    say(`Added ${item.name}.`);
+    say(`Added ${item.name} as ${item.sku}.`);
     showItem(await api(`/api/items/${item.id}`));
     await loadItems();
     if (el.newPrint.checked) await printLabel(item.id);
@@ -721,40 +858,59 @@ async function createItem() {
 /* ----------------------------------------------------------------- printing
  * Labels are printed when an item is created. The item already exists by then,
  * so a printer fault is reported but never undoes the add. */
-async function printLabel(itemId) {
+
+/* Submit one label and wait for it. Resolves to the printer's result, or to
+   {ok: false, error} - it never throws, so a batch can stop cleanly. */
+async function runPrint(body) {
   try {
-    const { job_id } = await api("/api/print", {
-      method: "POST",
-      body: JSON.stringify({
-        item_id: itemId,
-        copies: parseInt(el.copies.value, 10) || 1,
-        symbology: el.symbology.value,
-      }),
-    });
-    const result = await waitForJob(job_id);
-    if (result.ok) {
-      const [w, h] = result.label_mm || [];
-      say(`Printed ${result.copies} label${result.copies > 1 ? "s" : ""}` +
-          (w ? ` (${w}×${h} mm).` : "."));
-    } else {
-      // Already a sentence about a physical thing to fix - show it verbatim.
-      say(result.error, "error", 10000);
-    }
+    const { job_id } = await api("/api/print", { method: "POST", body: JSON.stringify(body) });
+    return await waitForJob(job_id);
   } catch (e) {
-    say(e.message, "error", 10000);
-  } finally {
-    refreshPrinter();
-    refocus();
+    return { ok: false, error: e.message };
   }
+}
+
+async function printLabel(itemId) {
+  const result = await runPrint({
+    item_id: itemId,
+    copies: parseInt(el.copies.value, 10) || 1,
+    symbology: el.symbology.value,
+  });
+  if (result.ok) {
+    const [w, h] = result.label_mm || [];
+    say(`Printed ${plural(result.copies || 1, "label", "labels")}` + (w ? ` (${w}×${h} mm).` : "."));
+  } else {
+    // Already a sentence about a physical thing to fix - show it verbatim.
+    say(result.error, "error", 10000);
+  }
+  refreshPrinter();
+  refocus();
+}
+
+/* Rack labels are QR codes: RnD-WH-A-0.1 is too long for a Code 128 that scans
+   reliably on a 40 mm label. One job per label, stopping at the first fault. */
+async function printPositions(ids) {
+  let done = 0;
+  for (const id of ids) {
+    const result = await runPrint({ position_id: id, symbology: "qr", copies: 1 });
+    if (!result.ok) {
+      say(`${done ? `Printed ${done}, then: ` : ""}${result.error}`, "error", 10000);
+      break;
+    }
+    done += 1;
+  }
+  if (done === ids.length) say(`Printed ${plural(done, "rack label", "rack labels")}.`);
+  refreshPrinter();
+  refocus();
 }
 
 /* Preview of the label as it will print, rendered by the same code as the
    printer. The item does not exist yet, so the label is built from the form:
-   the SKU as text, and the scanned code (or the SKU) as the barcode. */
+   the code as text, and the scanned code (or the code) as the barcode. */
 async function previewLabel() {
   const sku = el.newSku.value.trim();
   if (!sku) {
-    say("Pick a category or type a SKU first: the label carries the SKU.", "error");
+    say("Pick a subcategory or type a code first: the label carries the code.", "error");
     return;
   }
   try {
@@ -793,169 +949,165 @@ async function waitForJob(jobId, timeoutMs = 90000) {
   throw new Error("The printer is taking longer than expected. Check it and try again.");
 }
 
-/* --------------------------------------------------- areas & categories & locations */
-async function loadAreas() {
-  try {
-    allAreas = await api("/api/areas?include_archived=true");
-    areasCache = allAreas.filter((a) => !a.archived);
-  } catch (e) {
-    say(e.message, "error");
-    return;
-  }
-  fillSelect(el.newArea, areasCache, "—");
-  fillNewCategory();
-  fillSelect(el.filterArea, areasCache, "All areas");
-  renderNav();
-  renderSetup();
-}
+/* -------------------------------------------------------------------- setup
+ * Both trees are drawn as folding rows. Every entry opens the same small
+ * dialog to edit it (and archive it from there); "Add" buttons open it empty
+ * for a new child. Which branches are open survives redraws and reloads. */
+const openNodes = new Set();
+try {
+  for (const key of JSON.parse(localStorage.getItem("openNodes") || "[]")) openNodes.add(key);
+} catch { /* storage unavailable: start folded */ }
 
-function areaName(areaId) {
-  const a = allAreas.find((x) => x.id === areaId);
-  return a ? a.name : "—";
-}
-
-async function loadCategories() {
-  try {
-    allCategories = await api("/api/categories?include_archived=true");
-    categoriesCache = allCategories.filter((c) => !c.archived);
-  } catch (e) {
-    say(e.message, "error");
-    return;
-  }
-  const label = (c) => `${areaName(c.area_id)} / ${c.name}`;
-  fillNewCategory();
-  fillSelect(el.filterCategory, categoriesCache, "All categories", label);
-  renderNav();
-  renderSetup();
-}
-
-async function loadLocations() {
-  try {
-    allLocations = await api("/api/locations?include_archived=true");
-    locationsCache = allLocations.filter((l) => !l.archived);
-  } catch (e) {
-    say(e.message, "error");
-    return;
-  }
-  fillNewLocation();
-  renderSetup();
-}
-
-/* Setup is drawn per area: each area with its own categories and shelves, and
-   the forms to add more right there, so nothing asks "which area?" twice. */
 function renderSetup() {
-  const box = el.setupAreas;
-  if (!box) return;
-  const itemsIn = new Map();
-  for (const it of allItems) {
-    const c = allCategories.find((x) => x.id === it.category_id);
-    if (c) itemsIn.set(c.area_id, (itemsIn.get(c.area_id) || 0) + 1);
-  }
-  const entry = (row, kind, extra = "") =>
-    `<li><span class="name">${escapeHtml(row.name)}</span>${extra}` +
-    `<button class="ghost" data-archive-${kind}="${row.id}">Archive</button></li>`;
+  if (!el.setupClasses) return;
+  const counts = itemCounts();
+  const n = (kind, id) => counts.get(`${kind}:${id}`) || 0;
+  const items = (kind, id) => (n(kind, id) ? plural(n(kind, id), "item", "items") : "");
+  const code = (row) => `<code>${escapeHtml(row.code)}</code>`;
+  const edit = (kind, row, label = "Edit") =>
+    `<button type="button" class="ghost" data-edit-node="${kind}" data-id="${row.id}">${label}</button>`;
+  const add = (kind, parentId, label) =>
+    `<button type="button" class="ghost" data-add-node="${kind}" data-parent="${parentId}">${label}</button>`;
+  const branch = (kind, row, summary, body) =>
+    `<details class="tree-node" data-key="${kind}:${row.id}"${openNodes.has(`${kind}:${row.id}`) ? " open" : ""}>` +
+    `<summary>${summary}</summary><div class="tree-body">${body}</div></details>`;
+  const empty = (text) => `<p class="muted small none">${text}</p>`;
+
+  /* Classification: macro rows fold open onto their subcategories; families
+     sit on the subcategory row as small chips. */
   let html = "";
-  if (!areasCache.length) {
-    html = '<section class="panel"><p class="muted">No areas yet. Add the first one above, ' +
-           'for example the room or zone where things are kept.</p></section>';
+  for (const m of activeNodes("macro")) {
+    const subs = activeNodes("subcategory", m.id);
+    const rows = subs.map((s) => {
+      const fams = activeNodes("family", s.id).map((f) =>
+        `<button type="button" class="node-chip" data-edit-node="family" data-id="${f.id}" ` +
+        `title="${attr(f.note || f.name)}">${escapeHtml(nodeLabel("family", f))}</button>`).join("");
+      return `<li>${code(s)}<div class="name">${escapeHtml(s.name)}` +
+        (s.note ? `<small>${escapeHtml(s.note)}</small>` : "") +
+        `<div class="chips-inline">${fams}${add("family", s.id, "+ Family")}</div></div>` +
+        `<span class="muted small">${items("subcategory", s.id)}</span>` +
+        edit("subcategory", s) + `</li>`;
+    }).join("");
+    html += branch("macro", m,
+      `${code(m)}<span class="name">${escapeHtml(m.name)}</span>` +
+      `<span class="muted small push-right">${plural(subs.length, "subcategory", "subcategories")}` +
+      `${n("macro", m.id) ? ` · ${items("macro", m.id)}` : ""}</span>`,
+      (rows ? `<ul class="entries">${rows}</ul>` : empty("No subcategories yet.")) +
+      `<div class="tree-actions">${add("subcategory", m.id, "Add subcategory")}` +
+      `${edit("macro", m, `Edit ${escapeHtml(m.code)}`)}</div>`);
   }
-  for (const a of areasCache) {
-    const cats = categoriesCache.filter((c) => c.area_id === a.id);
-    const locs = locationsCache.filter((l) => l.area_id === a.id);
-    const n = itemsIn.get(a.id) || 0;
-    html +=
-      `<section class="panel area-block" data-area="${a.id}">` +
-      `<header class="area-head"><h3>${escapeHtml(a.name)}</h3>` +
-      `<span class="muted">${n} item${n === 1 ? "" : "s"}</span>` +
-      `<button class="ghost push-right" data-archive-area="${a.id}">Archive area</button></header>` +
-      `<div class="area-cols">` +
-      `<div class="area-col"><h4>Categories</h4><ul class="entries">` +
-      (cats.length ? cats.map((c) => entry(c, "category",
-        c.prefix ? `<code title="SKU prefix">${escapeHtml(c.prefix)}</code>` : "")).join("")
-        : '<li class="none">No categories yet.</li>') +
-      `</ul><div class="inline-add">` +
-      `<input type="text" data-new-cat="${a.id}" placeholder="New category" aria-label="New category in ${escapeHtml(a.name)}">` +
-      `<input type="text" class="prefix" data-new-prefix="${a.id}" maxlength="8" placeholder="Prefix" ` +
-      `aria-label="SKU prefix" title="SKU prefix, generated if left empty">` +
-      `<button data-add-category="${a.id}">Add</button></div></div>` +
-      `<div class="area-col"><h4>Shelves</h4><ul class="entries">` +
-      (locs.length ? locs.map((l) => entry(l, "location")).join("")
-        : '<li class="none">No shelves yet.</li>') +
-      `</ul><div class="inline-add">` +
-      `<input type="text" data-new-loc="${a.id}" placeholder="New shelf, e.g. Shelf 1" aria-label="New shelf in ${escapeHtml(a.name)}">` +
-      `<button data-add-location="${a.id}">Add</button></div></div>` +
-      `</div></section>`;
+  el.setupClasses.innerHTML = html || empty("No macro-categories. Add the first one above.");
+
+  /* Locations: facility > area > unit, and each unit's positions drawn like
+     the rack itself - top level first, positions left to right. */
+  html = "";
+  for (const f of activeNodes("facility")) {
+    const areas = activeNodes("area", f.id);
+    const body = areas.map((a) => {
+      const units = activeNodes("unit", a.id).map((u) => {
+        const positions = activeNodes("position", u.id);
+        const levels = new Map();
+        for (const p of positions) {
+          const level = p.code.split(".")[0];
+          if (!levels.has(level)) levels.set(level, []);
+          levels.get(level).push(p);
+        }
+        const rack = [...levels.entries()].sort((x, y) => y[0] - x[0]).map(([level, ps]) =>
+          `<div class="rack-level"><span class="rack-label">Level ${escapeHtml(level)}</span>` +
+          ps.map((p) => `<button type="button" class="node-chip pos-chip${n("position", p.id) ? " used" : ""}" ` +
+            `data-edit-node="position" data-id="${p.id}" title="${attr(p.location_code + (p.note ? `: ${p.note}` : ""))}">` +
+            `${escapeHtml(p.code)}${n("position", p.id) ? `<small>${n("position", p.id)}</small>` : ""}</button>`).join("") +
+          `</div>`).join("");
+        return `<div class="loc-unit"><div class="loc-head">${code(u)}<span class="name">${escapeHtml(u.name)}</span>` +
+          `<span class="muted small">${plural(positions.length, "position", "positions")}` +
+          `${n("unit", u.id) ? ` · ${items("unit", u.id)}` : ""}</span>` +
+          `<span class="push-right"></span>${add("position", u.id, "+ Position")}` +
+          (positions.length ? `<button type="button" class="ghost" data-print-unit="${u.id}">Print labels</button>` : "") +
+          edit("unit", u) + `</div>` +
+          (rack ? `<div class="rack">${rack}</div>` : "") + `</div>`;
+      }).join("");
+      return `<div class="loc-area"><div class="loc-head">${code(a)}<span class="name">${escapeHtml(a.name)}</span>` +
+        `<span class="push-right"></span>${add("unit", a.id, "+ Storage unit")}${edit("area", a)}</div>` +
+        (units || empty("No storage units yet.")) + `</div>`;
+    }).join("");
+    const npos = areas.reduce((sum, a) => sum + activeNodes("unit", a.id)
+      .reduce((s2, u) => s2 + activeNodes("position", u.id).length, 0), 0);
+    html += branch("facility", f,
+      `${code(f)}<span class="name">${escapeHtml(f.name)}</span>` +
+      `<span class="muted small push-right">${plural(npos, "position", "positions")}` +
+      `${n("facility", f.id) ? ` · ${items("facility", f.id)}` : ""}</span>`,
+      (body || empty("No areas yet.")) +
+      `<div class="tree-actions">${add("area", f.id, "Add area")}` +
+      `${edit("facility", f, `Edit ${escapeHtml(f.code)}`)}</div>`);
   }
-  // Shelves from before areas existed: offer to assign each one an area.
-  const loose = locationsCache.filter((l) => l.area_id === null);
-  if (loose.length) {
-    const opts = areasCache.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
-    html += `<section class="panel unassigned"><h3 class="panel-title">Shelves without an area</h3>` +
-      `<p class="muted small">These were created before shelves belonged to areas. Give each one its area.</p>` +
-      `<ul class="entries">` + loose.map((l) =>
-        `<li><span class="name">${escapeHtml(l.name)}</span>` +
-        `<select data-assign-area="${l.id}" aria-label="Area for ${escapeHtml(l.name)}">` +
-        `<option value="">Assign area…</option>${opts}</select>` +
-        `<button class="ghost" data-archive-location="${l.id}">Archive</button></li>`).join("") +
-      `</ul></section>`;
-  }
-  box.innerHTML = html;
+  el.setupLocations.innerHTML = html || empty("No facilities. Add the first one above.");
 }
 
-async function addArea() {
-  const name = el.newAreaName.value.trim();
-  if (!name) {
-    say("Enter an area name.", "error");
-    return;
+/* One dialog for adding and editing any entry of either tree. */
+function nodeDialog(kind, row, parentId = null) {
+  const meta = KINDS[kind];
+  const parentCode = parentId ? fullCode(meta.parent, parentId) : "";
+  const used = row && CLASS_KINDS.includes(kind) ? (itemCounts().get(`${kind}:${row.id}`) || 0) : 0;
+  const fields = [{
+    key: "code", label: "Code", value: row ? row.code : "", maxlength: 5,
+    hint: used ? `Locked: ${plural(used, "item uses", "items use")} it in their code.`
+      : row && kind === "position" ? "Changing it changes the rack code: reprint the label."
+      : row && LOCATION_KINDS.includes(kind) ? "Changing it changes the rack codes below it: reprint those labels."
+      : meta.code,
+    disabled: used > 0,
+  }];
+  if (!meta.noName) fields.push({ key: "name", label: "Name", value: row ? row.name : "", maxlength: 200 });
+  if (meta.note) fields.push({ key: "note", label: meta.note, value: row ? row.note || "" : "", maxlength: 500 });
+
+  const title = row ? `${meta.label[0].toUpperCase()}${meta.label.slice(1)} ${fullCode(kind, row.id)}`
+    : `New ${meta.label}${parentCode ? ` in ${parentCode}` : ""}`;
+  const actions = [
+    { label: row ? "Save" : "Add", primary: true, onClick: () => saveNode(kind, row, parentId) },
+  ];
+  if (row && kind === "position") {
+    actions.push({ label: "Print label", onClick: () => { closeOverlay(); printPositions([row.id]); } });
   }
+  if (row) actions.push({ label: "Archive", danger: true, onClick: () => confirmArchiveNode(kind, row) });
+  actions.push({ label: "Cancel", onClick: closeOverlay });
+  overlay({ title, fields, actions });
+}
+
+async function saveNode(kind, row, parentId) {
+  const body = {};
+  for (const input of $("#overlay-form").querySelectorAll("[data-key]")) {
+    if (!input.disabled) body[input.dataset.key] = input.value.trim();
+  }
+  if ("note" in body && !body.note) body.note = null;
   try {
-    await api("/api/areas", { method: "POST", body: JSON.stringify({ name }) });
-    el.newAreaName.value = "";
-    say(`Added area ${name}.`);
-    await loadAreas();
+    const saved = row
+      ? await api(`/api/${KINDS[kind].plural}/${row.id}`, { method: "PATCH", body: JSON.stringify(body) })
+      : await api(`/api/${KINDS[kind].plural}`, {
+          method: "POST", body: JSON.stringify({ ...body, parent_id: parentId }),
+        });
+    closeOverlay();
+    // Open the branch the new entry went into, so it is in view.
+    for (const [k, n] of pathOf(kind, saved.id).slice(0, -1)) openNodes.add(`${k}:${n.id}`);
+    rememberOpenNodes();
+    await loadTrees();
+    say(`${row ? "Saved" : "Added"} ${fullCode(kind, saved.id)}.`);
   } catch (e) {
-    say(e.message, "error");
+    say(e.message, "error");     // the dialog stays open with what was typed
   }
 }
 
-async function addCategory(areaId) {
-  const nameInput = el.setupAreas.querySelector(`[data-new-cat="${areaId}"]`);
-  const prefixInput = el.setupAreas.querySelector(`[data-new-prefix="${areaId}"]`);
-  const name = nameInput.value.trim();
-  if (!name) {
-    say("Type a name for the new category.", "error");
-    nameInput.focus();
-    return;
-  }
-  try {
-    await api("/api/categories", {
-      method: "POST",
-      body: JSON.stringify({ area_id: areaId, name, prefix: prefixInput.value.trim() || null }),
-    });
-    say(`Added category ${name}.`);
-    await loadCategories();
-    el.setupAreas.querySelector(`[data-new-cat="${areaId}"]`).focus();
-  } catch (e) {
-    say(e.message, "error");
-  }
+function confirmArchiveNode(kind, row) {
+  const child = CHILD[kind];
+  const below = child ? activeNodes(child, row.id).length : 0;
+  confirmBox(
+    `Archive ${fullCode(kind, row.id)}?`,
+    (below ? `Everything under it is hidden with it (${plural(below, KINDS[child].label, KINDS[child].many)}). ` : "") +
+    "Items keep their code and location. You can restore it from the Archive page.",
+    "Archive",
+  ).then((ok) => { if (ok) setArchived(kind, row.id, true); });
 }
 
-async function addLocation(areaId) {
-  const input = el.setupAreas.querySelector(`[data-new-loc="${areaId}"]`);
-  const name = input.value.trim();
-  if (!name) {
-    say("Type a name for the new shelf.", "error");
-    input.focus();
-    return;
-  }
-  try {
-    await api("/api/locations", { method: "POST", body: JSON.stringify({ area_id: areaId, name }) });
-    say(`Added shelf ${name}.`);
-    await loadLocations();
-    el.setupAreas.querySelector(`[data-new-loc="${areaId}"]`).focus();
-  } catch (e) {
-    say(e.message, "error");
-  }
+function rememberOpenNodes() {
+  try { localStorage.setItem("openNodes", JSON.stringify([...openNodes])); } catch {}
 }
 
 async function refreshPrinter() {
@@ -1007,14 +1159,23 @@ async function loadVersion() {
  * Both end the same way: the app stops, the launcher starts it again (running
  * the new release if one was installed), and this page reloads once the app
  * reports a different boot id. The overlay keeps anyone from scanning into a
- * server that is about to disappear. */
+ * server that is about to disappear. It doubles as the confirmation prompt and
+ * as the small form Setup edits its entries in. */
 let installed = false;
 let updateInfo = null;
 
-function overlay({ title, text = "", spinner = false, actions = [] }) {
+function overlay({ title, text = "", spinner = false, fields = [], actions = [] }) {
   $("#overlay-title").textContent = title;
   $("#overlay-text").textContent = text;
+  $("#overlay-text").hidden = !text;
   $("#overlay-spinner").hidden = !spinner;
+  const form = $("#overlay-form");
+  form.innerHTML = fields.map((f) =>
+    `<div class="field"><label for="ov-${f.key}">${escapeHtml(f.label)}</label>` +
+    `<input id="ov-${f.key}" data-key="${f.key}" type="text" autocomplete="off" ` +
+    `maxlength="${f.maxlength || 200}" value="${attr(f.value || "")}"${f.disabled ? " disabled" : ""}>` +
+    (f.hint ? `<p class="hint">${escapeHtml(f.hint)}</p>` : "") + `</div>`).join("");
+  form.hidden = !fields.length;
   const box = $("#overlay-actions");
   box.innerHTML = "";
   for (const a of actions) {
@@ -1022,13 +1183,24 @@ function overlay({ title, text = "", spinner = false, actions = [] }) {
     b.type = "button";
     b.textContent = a.label;
     if (a.primary) b.className = "primary";
+    if (a.danger) b.className = "danger push-right";
     b.addEventListener("click", a.onClick);
     box.appendChild(b);
   }
   $("#overlay").hidden = false;
-  const first = box.querySelector("button");
+  const first = form.querySelector("input:not([disabled])") || box.querySelector("button");
   if (first) first.focus();
 }
+
+/* Enter in a dialog field means the primary action. Handled on keydown, and
+   the browser's own submit is cancelled, so it can never fire twice. */
+$("#overlay-form").addEventListener("submit", (e) => e.preventDefault());
+$("#overlay-form").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const primary = $("#overlay-actions .primary");
+  if (primary) primary.click();
+});
 
 function closeOverlay() {
   $("#overlay").hidden = true;
@@ -1202,8 +1374,7 @@ $("#btn-cancel-create").addEventListener("click", () => {
     showView("stock");
     return;
   }
-  el.newPanel.hidden = true;
-  el.recentCard.hidden = !el.panel.hidden;
+  showScanPanel(el.recentCard);
   refocus();
 });
 $("#btn-restart").addEventListener("click", restartApp);
@@ -1215,148 +1386,121 @@ for (const id of ["#btn-update-later", "#btn-update-close"]) {
     $("#update-bar").hidden = true;
   });
 }
-$("#btn-add-area").addEventListener("click", addArea);
-el.newAreaName.addEventListener("keydown", (e) => { if (e.key === "Enter") addArea(); });
-el.newCategory.addEventListener("change", prefillSku);
-el.newCategory.addEventListener("change", () => {
-  const cat = categoriesCache.find((c) => c.id === parseInt(el.newCategory.value, 10));
-  if (cat && cat.area_id !== newFormArea()) {
-    el.newArea.value = cat.area_id;      // a category belongs to exactly one area
-    fillNewCategory();                   // now only that area's, without the prefix
-    fillNewLocation();
-  }
+
+/* Each level of a cascade refills the levels below it. The classification
+   also decides the suggested code; the filters reload the list. */
+for (const chain of [FORM_CLASS, FORM_LOCATION, FILTER_CLASS, FILTER_LOCATION]) {
+  chain.forEach(([, sel], i) => sel.addEventListener("change", () => {
+    fillChain(chain, i + 1);
+    if (chain === FORM_CLASS) prefillSku();
+    if (chain === FILTER_CLASS || chain === FILTER_LOCATION) {
+      if (chain === FILTER_CLASS) renderNav();
+      loadItems();
+    }
+  }));
+}
+
+/* Open buttons appear in the Stock list and in a scanned position's list. */
+for (const box of [el.items, $("#pos-items tbody")]) {
+  box.addEventListener("click", async (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.edit) { showEdit(b.dataset.edit); return; }
+    const id = b.dataset.open;
+    if (!id) return;
+    showItem(await api(`/api/items/${id}`));
+  });
+}
+
+$("#btn-pos-print").addEventListener("click", () => {
+  if (shownPosition) printPositions([shownPosition.id]);
 });
-el.newArea.addEventListener("change", () => {
-  fillNewCategory();
-  fillNewLocation();
-  prefillSku();                           // the category may have been cleared by the filter
-});
-el.items.addEventListener("click", async (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  if (b.dataset.edit) { showEdit(b.dataset.edit); return; }
-  const id = b.dataset.open;
-  if (!id) return;
-  showItem(await api(`/api/items/${id}`));
+$("#btn-pos-close").addEventListener("click", () => {
+  shownPosition = null;
+  showScanPanel(el.recentCard);
+  refocus();
 });
 
 /* Everything in Setup is drawn by renderSetup(), so its controls are handled
    here by delegation. */
-el.setupAreas.addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  const d = b.dataset;
-  if (d.addCategory) addCategory(parseInt(d.addCategory, 10));
-  else if (d.addLocation) addLocation(parseInt(d.addLocation, 10));
-  else if (d.archiveCategory) setArchived("categories", d.archiveCategory, true);
-  else if (d.archiveLocation) setArchived("locations", d.archiveLocation, true);
-  else if (d.archiveArea) confirmArchiveArea(parseInt(d.archiveArea, 10));
-});
-
-el.setupAreas.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  const d = e.target.dataset;
-  const area = parseInt(d.newCat || d.newPrefix || d.newLoc, 10);
-  if (!area) return;
-  if (d.newLoc) addLocation(area); else addCategory(area);
-});
-
-/* Show the prefix the server would pick as a placeholder while typing a name. */
-el.setupAreas.addEventListener("input", async (e) => {
-  const areaId = e.target.dataset.newCat;
-  if (!areaId) return;
-  const prefix = el.setupAreas.querySelector(`[data-new-prefix="${areaId}"]`);
-  const name = e.target.value.trim();
-  if (!name) { prefix.placeholder = "Prefix"; return; }
-  try {
-    const r = await api(`/api/categories/suggest-prefix?name=${encodeURIComponent(name)}`);
-    prefix.placeholder = r.prefix;
-  } catch { /* the placeholder is a convenience only */ }
-});
-
-el.setupAreas.addEventListener("change", async (e) => {
-  const id = e.target.dataset.assignArea;
-  if (!id || !e.target.value) return;
-  try {
-    await api(`/api/locations/${id}`, {
-      method: "PATCH", body: JSON.stringify({ area_id: parseInt(e.target.value, 10) }),
-    });
-    say("Shelf assigned.");
-  } catch (err) { say(err.message, "error"); }
-  await loadLocations();
-});
-
-function confirmArchiveArea(id) {
-  const area = areasCache.find((a) => a.id === id);
-  const cats = categoriesCache.filter((c) => c.area_id === id).length;
-  const locs = locationsCache.filter((l) => l.area_id === id).length;
-  overlay({
-    title: `Archive ${area ? area.name : "this area"}?`,
-    text: `Its ${cats} categor${cats === 1 ? "y" : "ies"} and ${locs} shel${locs === 1 ? "f" : "ves"} ` +
-          "are archived with it. Items keep their category and shelf. " +
-          "You can restore everything from the Archive page.",
-    actions: [
-      { label: "Archive", primary: true, onClick: async () => {
-        closeOverlay();
-        await setArchived("areas", id, true);
-      } },
-      { label: "Cancel", onClick: closeOverlay },
-    ],
+for (const box of [el.setupClasses, el.setupLocations]) {
+  box.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const d = b.dataset;
+    if (d.editNode) nodeDialog(d.editNode, nodeOf(d.editNode, Number(d.id)));
+    else if (d.addNode) nodeDialog(d.addNode, null, Number(d.parent));
+    else if (d.printUnit) {
+      const ids = activeNodes("position", Number(d.printUnit)).map((p) => p.id);
+      confirmBox(`Print ${plural(ids.length, "rack label", "rack labels")}?`,
+                 `One QR label per position of ${fullCode("unit", Number(d.printUnit))}.`, "Print")
+        .then((ok) => { if (ok) printPositions(ids); });
+    }
   });
+  // "toggle" does not bubble, so listen while it is captured on the way down.
+  box.addEventListener("toggle", (e) => {
+    const key = e.target.dataset && e.target.dataset.key;
+    if (!key) return;
+    if (e.target.open) openNodes.add(key); else openNodes.delete(key);
+    rememberOpenNodes();
+  }, true);
 }
+$("#btn-add-macro").addEventListener("click", () => nodeDialog("macro", null));
+$("#btn-add-facility").addEventListener("click", () => nodeDialog("facility", null));
 
 /* ------------------------------------------------------------------ archive
  * Archive and restore share one path: flip the flag, then reload everything,
- * because an area takes its categories and locations with it. */
-const KIND_LABEL = { items: "item", areas: "area", categories: "category", locations: "shelf" };
-
+ * because an entry takes everything under it along. */
 async function setArchived(kind, id, archived) {
+  const path = kind === "item" ? "items" : KINDS[kind].plural;
   try {
-    await api(`/api/${kind}/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) });
-    say(`${archived ? "Archived" : "Restored"} the ${KIND_LABEL[kind]}.`);
+    await api(`/api/${path}/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) });
+    say(`${archived ? "Archived" : "Restored"} the ${kind === "item" ? "item" : KINDS[kind].label}.`);
   } catch (err) {
     say(err.message, "error");
     return false;
   }
-  await loadAreas();
-  await loadCategories();
-  await loadLocations();
+  await loadTrees();
   await loadItems();
   if (view === "archive") loadArchive();
   return true;
 }
 
-function archiveRows(tbody, list, kind, cells, empty) {
+function archiveRows(tbody, list, cells, empty) {
   tbody.innerHTML = "";
   if (!list.length) {
     tbody.innerHTML = `<tr><td class="muted">${empty}</td></tr>`;
     return;
   }
-  for (const row of list) {
+  for (const [kind, row] of list) {
     const tr = document.createElement("tr");
-    tr.innerHTML = cells(row).map((c) => `<td>${c}</td>`).join("") +
+    tr.innerHTML = cells(kind, row).map((c) => `<td>${c}</td>`).join("") +
       `<td class="actions-cell"><button class="ghost" data-restore="${kind}" data-id="${row.id}">Restore</button></td>`;
     tbody.appendChild(tr);
   }
 }
 
+/* Only rows archived themselves are listed: the ones hidden under them come
+   back with them. */
+const archivedOf = (kinds) =>
+  kinds.flatMap((k) => tree[k].filter((n) => n.archived).map((n) => [k, n]));
+
 async function loadArchive() {
   let items = [];
   try { items = await api("/api/items?archived=true"); } catch (e) { say(e.message, "error"); }
-  archiveRows($("#arch-items tbody"), items, "items", (i) => [
+  archiveRows($("#arch-items tbody"), items.map((i) => ["item", i]), (_, i) => [
     escapeHtml(i.name), `<span class="muted">${escapeHtml(i.sku)}</span>`,
     `<span class="num">${fmt(i.qty)} ${escapeHtml(i.unit)}</span>`,
   ], "No archived items.");
-  archiveRows($("#arch-areas tbody"), allAreas.filter((a) => a.archived), "areas",
-    (a) => [escapeHtml(a.name)], "No archived areas.");
-  archiveRows($("#arch-categories tbody"), allCategories.filter((c) => c.archived), "categories",
-    (c) => [escapeHtml(areaName(c.area_id)), escapeHtml(c.name),
-            c.archived_by_area ? '<span class="muted small">with its area</span>' : ""],
-    "No archived categories.");
-  archiveRows($("#arch-locations tbody"), allLocations.filter((l) => l.archived), "locations",
-    (l) => [escapeHtml(areaName(l.area_id)), escapeHtml(l.name),
-            l.archived_by_area ? '<span class="muted small">with its area</span>' : ""],
-    "No archived shelves.");
+  const nodeCells = (kind, n) => [
+    `<span class="muted">${escapeHtml(KINDS[kind].label)}</span>`,
+    `<code>${escapeHtml(fullCode(kind, n.id))}</code>`,
+    escapeHtml(n.name || n.note || ""),
+  ];
+  archiveRows($("#arch-classes tbody"), archivedOf(CLASS_KINDS), nodeCells,
+              "Nothing archived in the classification.");
+  archiveRows($("#arch-locations tbody"), archivedOf(LOCATION_KINDS), nodeCells,
+              "No archived locations.");
 }
 
 $("#view-archive").addEventListener("click", (e) => {
@@ -1378,7 +1522,7 @@ $("#btn-archive-item").addEventListener("click", () => {
     actions: [
       { label: "Archive", primary: true, onClick: async () => {
         closeOverlay();
-        if (await setArchived("items", id, true)) {
+        if (await setArchived("item", id, true)) {
           editingId = null;
           el.newPanel.hidden = true;
           showView("stock");
@@ -1392,29 +1536,31 @@ $("#btn-archive-item").addEventListener("click", () => {
 $("#btn-hit-restore").addEventListener("click", async () => {
   if (!archivedHit) return;
   const id = archivedHit.id;
-  if (await setArchived("items", id, false)) showItem(await api(`/api/items/${id}`));
+  if (await setArchived("item", id, false)) showItem(await api(`/api/items/${id}`));
 });
 $("#btn-hit-cancel").addEventListener("click", () => {
-  hideArchivedHit();
-  el.recentCard.hidden = false;
+  archivedHit = null;
+  showScanPanel(el.recentCard);
   refocus();
 });
 
 el.nav.addEventListener("click", (e) => {
-  const t = e.target.closest("[data-toggle-area]");
+  const t = e.target.closest("[data-toggle-macro]");
   if (t) {
-    const id = Number(t.dataset.toggleArea);
-    if (!collapsedAreas.delete(id)) collapsedAreas.add(id);
-    try { localStorage.setItem("collapsedAreas", JSON.stringify([...collapsedAreas])); } catch {}
+    const id = Number(t.dataset.toggleMacro);
+    if (!collapsedMacros.delete(id)) collapsedMacros.add(id);
+    try { localStorage.setItem("collapsedMacros", JSON.stringify([...collapsedMacros])); } catch {}
     renderNav();
     return;
   }
-  const a = e.target.closest("[data-area]");
+  const a = e.target.closest("[data-macro]");
   if (!a) return;
   e.preventDefault();
-  el.filterArea.value = a.dataset.area;
-  el.filterCategory.value = a.dataset.category;
+  el.filterMacro.value = a.dataset.macro;
+  fillChain(FILTER_CLASS, 1);
+  el.filterSub.value = a.dataset.sub;
   showView("stock");
+  renderNav();
   loadItems();
 });
 
@@ -1427,30 +1573,25 @@ for (const [tile, which] of [[el.tileReorder, "reorder"], [el.tileLow, "low"]]) 
 }
 
 let searchTimer = null;
-for (const node of [el.search, el.filterArea, el.filterCategory]) {
-  node.addEventListener("input", () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadItems, 200);
-  });
-}
+el.search.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadItems, 200);
+});
 
 /* A stray keystroke anywhere on the page - the start of a scan when focus has
    wandered - is pulled back into the scan field so the scan is not lost. */
 document.addEventListener("keydown", (e) => {
   const tag = document.activeElement.tagName;
   const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
-  if (!typing && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+  if (!typing && $("#overlay").hidden && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
     el.scan.focus();
   }
 });
 
-/* Areas must load before categories (categories show/label their area name)
-   and both before the items list (its Category column looks categoriesCache
-   up by id). */
+/* The trees load before the items list: its Classification column and the
+   sidebar counts look nodes up by id. */
 (async () => {
-  await loadAreas();
-  await loadCategories();
-  await loadLocations();
+  await loadTrees();
   await loadItems();
   showView(location.hash.slice(1));
 })();

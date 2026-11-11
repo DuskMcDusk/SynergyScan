@@ -75,20 +75,33 @@ into the box.
 
 | To do this | Do this |
 |---|---|
-| Look something up | Scan it, or type the SKU and press Enter |
+| Look something up | Scan it, or type the code and press Enter |
 | Book stock in | Scan, set the quantity, click **Receive … in** |
 | Book stock out | Scan, set the quantity, click **Issue … out** |
 | Add a new product | Scan a code the system doesn't know (or click **Add a new item**), fill in the form, click **Add item**. A label prints with it unless you untick the box |
 | Print or reprint a label | **Stock** → **Edit** on the item → tick *Print a label after saving*, optionally **Preview label**, then save |
 | Change an item | **Stock** → **Edit** |
-| Browse or search stock | **Stock**: search by name, SKU or barcode, filter by area and category |
+| Move an item | Open it (scan its label), then scan the rack label of its new position |
+| See what is on a shelf | Scan the rack label of the position |
+| Browse or search stock | **Stock**: search by name, code or location, filter by classification and by location |
 | See what needs reordering | **Stock** → the **to reorder** and **running low** buttons |
-| Add areas, categories, shelves | **Setup** |
+| Add or edit subcategories, families, positions; print rack labels | **Setup** |
 | Hide something without losing it | Archive it; **Archive** lists everything archived and restores it with its history |
 
-Items are organised as **Area › Category › Shelf**. Each area has its own
-categories and shelves, and a new item's SKU is generated from its category's
-prefix (for example `PASTA-0001`) unless you type one. An item has a **reorder**
+Items sit in two independent trees, both pre-loaded from the inventory proposal
+and editable in **Setup**:
+
+- **Classification**: Macro-category (2 letters) › Subcategory (3) › Item family
+  (2, optional). It makes the item's code: `HY-TUB-0001`, or `CH-REA-MN-0001`
+  with a family, numbered per full prefix. A classification code locks once an
+  item uses it. Clearing the code when editing an item gives it a new one.
+- **Location**: Facility › Area › Storage unit › Position, e.g. `RnD-WH-A-0.1`
+  (level 0 is the bottom shelf, positions count from the left). Each position
+  has a QR rack label to scan. Moving an item changes its position, never its code.
+
+An item can also carry a **technical reference** (e.g. the vault code of a
+mechanical part). Labels default to QR: the item codes are longer than a
+40 mm Code 128 prints reliably. An item has a **reorder**
 level and an optional higher **low** level, which give the three states
 *sufficient*, *running low* and *reorder*.
 
