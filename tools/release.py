@@ -44,7 +44,7 @@ EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".db", ".db-wal", ".db-shm", ".log"}
 
 def next_version(existing: set[str], on: date | None = None) -> str:
     """Today's date plus the next free sequence number."""
-    d = on or date.today()
+    d = on or date.today()  # noqa: DTZ011 - local date of whoever cuts the release
     prefix = f"{d.year}.{d.month:02d}.{d.day:02d}"
     n = 1
     while f"{prefix}-{n}" in existing:
@@ -187,8 +187,8 @@ def main() -> int:
     if not a.publish:
         print(f"  1. gh release create v{version} {archive} "
               f'--title "SynergyScan {version}" --notes "{a.notes or version}"')
-    print(f"  2. Check the archive installs: extract it somewhere and run "
-          f"bootstrap\\install.ps1 -InstallRoot C:\\SynergyScan-test")
+    print("  2. Check the archive installs: extract it somewhere and run "
+          "bootstrap\\install.ps1 -InstallRoot C:\\SynergyScan-test")
     print(f"  3. Only then: git add channels/{a.channel}.json && git commit && git push")
     print("     Machines take the update on their next start. Until you push,")
     print("     nothing has shipped.")

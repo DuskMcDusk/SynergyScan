@@ -104,17 +104,16 @@ def test_archived_items_are_not_found_by_scanning(con, item):
 
 
 def test_create_item_accepts_the_new_master_fields(con):
-    area = db.create_area(con, "Battery Testing")
-    category = db.create_category(con, area, "Electrodes")
-    location = db.create_location(con, "Shelf D1")
+    sub, pos = _sub(con, "CH", "FOM"), _pos(con, "RnD-WH-A-0.1")
     item_id = db.create_item(
-        con, sku="FOAM-001", name="Fe foam", category_id=category,
-        location_id=location, supplier="Supplier A", lead_time_days=30,
-        min_qty=5, low_qty=8,
+        con, sku="FOAM-001", name="Fe foam", subcategory_id=sub,
+        position_id=pos, supplier="Supplier A", lead_time_days=30,
+        min_qty=5, low_qty=8, tech_ref=" V-1234 ",
     )
     row = db.get_item(con, item_id)
-    assert row["category_id"] == category
-    assert row["location_id"] == location
+    assert row["subcategory_id"] == sub
+    assert row["position_id"] == pos
+    assert row["tech_ref"] == "V-1234"
     assert row["supplier"] == "Supplier A"
     assert row["lead_time_days"] == 30
     assert row["low_qty"] == 8
@@ -122,19 +121,21 @@ def test_create_item_accepts_the_new_master_fields(con):
 
 def test_create_item_leaves_new_fields_null_by_default(con, item):
     row = db.get_item(con, item)
-    assert row["category_id"] is None
-    assert row["location_id"] is None
+    assert row["subcategory_id"] is None
+    assert row["family_id"] is None
+    assert row["position_id"] is None
+    assert row["tech_ref"] is None
     assert row["supplier"] is None
     assert row["lead_time_days"] is None
     assert row["low_qty"] is None
 
 
 def test_update_item_can_set_the_new_fields(con, item):
-    category = db.create_category(con, db.create_area(con, "Chemistry"), "Solvents")
-    db.update_item(con, item, category_id=category, supplier="New Supplier",
+    sub = _sub(con, "CH", "REA")
+    db.update_item(con, item, subcategory_id=sub, supplier="New Supplier",
                    low_qty=20)
     row = db.get_item(con, item)
-    assert row["category_id"] == category
+    assert row["subcategory_id"] == sub
     assert row["supplier"] == "New Supplier"
     assert row["low_qty"] == 20
 
@@ -150,72 +151,112 @@ def test_low_qty_below_min_qty_is_refused_on_update(con, item):
         db.update_item(con, item, low_qty=1)
 
 
-# ------------------------------------------------------------------- areas
-def test_create_and_list_areas(con):
-    db.create_area(con, "Battery Testing")
-    db.create_area(con, "Chemistry")
-    assert [a["name"] for a in db.list_areas(con)] == ["Battery Testing", "Chemistry"]
+# ------------------------------------------------- classification & locations
+def _macro(con, code):
+    return next(r["id"] for r in db.list_nodes(con, "macro") if r["code"] == code)
 
 
-def test_area_name_is_unique_ignoring_case(con):
-    db.create_area(con, "Chemistry")
+def _sub(con, macro, code):
+    return next(r["id"] for r in db.list_nodes(con, "subcategory", _macro(con, macro))
+                if r["code"] == code)
+
+
+def _pos(con, location_code):
+    return db.find_position(con, location_code)["id"]
+
+
+def test_the_proposal_lists_are_preloaded(con):
+    """Slides 17-27: five macro-categories, 56 subcategories, the CH-REA families,
+    three facilities and the 44 positions of the RnD warehouse shelves."""
+    per_macro = {m["code"]: len(db.list_nodes(con, "subcategory", m["id"]))
+                 for m in db.list_nodes(con, "macro")}
+    assert per_macro == {"EL": 8, "ME": 14, "CH": 6, "HY": 14, "CI": 14}
+    assert [f["code"] for f in db.list_nodes(con, "family", _sub(con, "CH", "REA"))] == \
+        ["IS", "MN", "MP", "OS", "PA", "SV"]
+    assert len(db.list_nodes(con, "family")) == 6
+    assert {f["code"] for f in db.list_nodes(con, "facility")} == {"LsT", "HQ", "RnD"}
+    codes = [p["location_code"] for p in db.list_nodes(con, "position")]
+    assert len(codes) == 44
+    assert sum(c.startswith("RnD-WH-A-") for c in codes) == 14
+    assert codes[:4] == ["RnD-WH-A-0.1", "RnD-WH-A-0.2", "RnD-WH-A-0.3", "RnD-WH-A-1.1"]
+
+
+def test_classification_codes_follow_the_2_3_2_format(con):
+    m = db.create_node(con, "macro", "pn", "Pneumatics")
+    assert db.get_node(con, "macro", m)["code"] == "PN"           # capitals
+    for kind, parent, bad in (("macro", None, "PNE"), ("subcategory", m, "VA"),
+                              ("subcategory", m, "V4L"), ("family", None, "A")):
+        with pytest.raises(ValueError):
+            db.create_node(con, kind, bad, "x", parent)
+    s = db.create_node(con, "subcategory", "val", "Valves", m)
+    db.create_node(con, "family", "ss", "Solenoid", s)
+
+
+def test_codes_are_unique_within_their_parent_only(con):
+    """SPR is both ME Springs and CI Spare equipment, as in the slides."""
+    assert _sub(con, "ME", "SPR") != _sub(con, "CI", "SPR")
     with pytest.raises(sqlite3.IntegrityError):
-        db.create_area(con, "chemistry")
+        db.create_node(con, "subcategory", "spr", "Again", _macro(con, "ME"))
 
 
-def test_archiving_an_area_hides_it_but_does_not_delete_it(con):
-    area = db.create_area(con, "Chemistry")
-    db.update_area(con, area, archived=True)
-    assert db.list_areas(con) == []
-    assert db.get_area(con, area) is not None
-
-
-# -------------------------------------------------------------- categories
-def test_create_and_list_categories_for_an_area(con):
-    area = db.create_area(con, "Battery Testing")
-    db.create_category(con, area, "Electrodes")
-    db.create_category(con, area, "Membranes")
-    other = db.create_area(con, "Chemistry")
-    db.create_category(con, other, "Solvents")
-    assert [c["name"] for c in db.list_categories(con, area_id=area)] == \
-        ["Electrodes", "Membranes"]
-    assert len(db.list_categories(con)) == 3
-
-
-def test_category_requires_a_real_area(con):
+def test_a_node_needs_its_parent(con):
+    with pytest.raises(ValueError):
+        db.create_node(con, "subcategory", "ABC", "No macro")
     with pytest.raises(sqlite3.IntegrityError):
-        db.create_category(con, 9999, "Electrodes")
+        db.create_node(con, "subcategory", "ABC", "Bad macro", 9999)
 
 
-def test_category_name_is_unique_within_an_area_but_not_across_areas(con):
-    a = db.create_area(con, "Battery Testing")
-    b = db.create_area(con, "Chemistry")
-    db.create_category(con, a, "Solvents")
+def test_location_codes_keep_their_case(con):
+    f = db.create_node(con, "facility", "Lab", "Laboratory")
+    assert db.get_node(con, "facility", f)["code"] == "Lab"
     with pytest.raises(sqlite3.IntegrityError):
-        db.create_category(con, a, "solvents")
-    db.create_category(con, b, "Solvents")            # different area: fine
+        db.create_node(con, "facility", "rnd", "Clash ignoring case")
 
 
-# --------------------------------------------------------------- locations
-def test_create_and_list_locations(con):
-    area = db.create_area(con, "A")
-    db.create_location(con, "Shelf D1", area_id=area)
-    db.create_location(con, "Drawer C4", area_id=area)
-    assert [l["name"] for l in db.list_locations(con)] == ["Drawer C4", "Shelf D1"]
+def test_a_position_stores_its_full_scannable_code(con):
+    hq = next(f["id"] for f in db.list_nodes(con, "facility") if f["code"] == "HQ")
+    area = db.create_node(con, "area", "OF", "Office", hq)
+    unit = db.create_node(con, "unit", "D", "Drawer unit", area)
+    pos = db.create_node(con, "position", "1.2", "", unit, note="Spare fuses")
+    assert db.get_node(con, "position", pos)["location_code"] == "HQ-OF-D-1.2"
+    assert db.find_position(con, "hq-of-d-1.2")["id"] == pos
+    with pytest.raises(ValueError):
+        db.create_node(con, "position", "top", "", unit)
 
 
-def test_location_name_is_unique_within_an_area_only(con):
-    a, b = db.create_area(con, "A"), db.create_area(con, "B")
-    db.create_location(con, "Shelf 1", area_id=a)
-    db.create_location(con, "Shelf 1", area_id=b)          # other area: fine
-    with pytest.raises(sqlite3.IntegrityError):
-        db.create_location(con, "shelf 1", area_id=a)
+def test_renaming_a_location_code_rewrites_the_rack_codes_below(con):
+    unit_a = db.get_node(con, "position", _pos(con, "RnD-WH-A-0.1"))["unit_id"]
+    db.update_node(con, "unit", unit_a, code="AA")
+    assert db.find_position(con, "RnD-WH-A-0.1") is None
+    assert db.find_position(con, "RnD-WH-AA-0.1") is not None
+    assert db.find_position(con, "RnD-WH-B-0.1") is not None      # other units untouched
 
 
-def test_update_location_fields(con):
-    loc = db.create_location(con, "Shelf D1")
-    db.update_location(con, loc, name="Shelf D1 (top)")
-    assert db.get_location(con, loc)["name"] == "Shelf D1 (top)"
+def test_archiving_a_node_hides_its_whole_branch_and_restoring_brings_it_back(con):
+    ch = _macro(con, "CH")
+    rea = _sub(con, "CH", "REA")
+    db.update_node(con, "family", db.list_nodes(con, "family", rea)[0]["id"], archived=1)
+    db.update_node(con, "macro", ch, archived=1)
+    assert db.list_nodes(con, "subcategory", ch) == []
+    assert db.list_nodes(con, "family", rea) == []
+    assert len(db.list_nodes(con, "family", rea, include_archived=True)) == 6
+    db.update_node(con, "macro", ch, archived=0)
+    assert len(db.list_nodes(con, "subcategory", ch)) == 6
+    assert len(db.list_nodes(con, "family", rea)) == 5             # the one archived on its own stays
+
+
+def test_an_archived_position_is_not_found_by_scanning(con):
+    pos = _pos(con, "RnD-WH-A-0.1")
+    db.update_node(con, "position", pos, archived=1)
+    assert db.find_position(con, "RnD-WH-A-0.1") is None
+
+
+def test_moving_an_item_never_changes_its_code(con):
+    item = db.create_item(con, sku="", name="Tube", subcategory_id=_sub(con, "HY", "TUB"),
+                          position_id=_pos(con, "RnD-WH-C-1.1"))
+    db.update_item(con, item, position_id=_pos(con, "RnD-WH-A-2.3"))
+    row = db.get_item(con, item)
+    assert (row["sku"], row["position_id"]) == ("HY-TUB-0001", _pos(con, "RnD-WH-A-2.3"))
 
 
 # ----------------------------------------------------------------- movements
@@ -343,15 +384,14 @@ def test_stock_on_hand_view_lists_derived_quantities(con, item):
 
 
 def test_list_items_exposes_the_new_item_master_columns(con):
-    area = db.create_area(con, "Battery Testing")
-    category = db.create_category(con, area, "Electrodes")
-    location = db.create_location(con, "Shelf D1")
-    db.create_item(con, sku="FOAM-001", name="Fe foam", category_id=category,
-                   location_id=location, low_qty=8, min_qty=5,
+    sub, pos = _sub(con, "CH", "FOM"), _pos(con, "RnD-WH-B-2.2")
+    db.create_item(con, sku="FOAM-001", name="Fe foam", subcategory_id=sub,
+                   position_id=pos, low_qty=8, min_qty=5,
                    supplier="Supplier A", lead_time_days=30)
     row = db.list_items(con)[0]
-    assert row["category_id"] == category
-    assert row["location_id"] == location
+    assert row["subcategory_id"] == sub
+    assert row["position_id"] == pos
+    assert row["location_code"] == "RnD-WH-B-2.2"
     assert row["low_qty"] == 8
     assert row["supplier"] == "Supplier A"
     assert row["lead_time_days"] == 30
@@ -366,18 +406,27 @@ def test_low_stock_filter(con):
     assert [r["sku"] for r in low] == ["LOW"]
 
 
-def test_list_items_can_be_filtered_by_category_and_area(con):
-    area = db.create_area(con, "Battery Testing")
-    category = db.create_category(con, area, "Electrodes")
-    other_area = db.create_area(con, "Chemistry")
-    other_category = db.create_category(con, other_area, "Solvents")
-    db.create_item(con, sku="A-1", name="In category", category_id=category)
-    db.create_item(con, sku="B-1", name="Elsewhere", category_id=other_category)
-    db.create_item(con, sku="C-1", name="Uncategorised")
+def test_list_items_filters_by_either_tree(con):
+    """Classification and location are independent: each filters on its own."""
+    a = db.create_item(con, sku="", name="Pump", subcategory_id=_sub(con, "HY", "PMP"),
+                       position_id=_pos(con, "RnD-WH-A-3.3"))
+    b = db.create_item(con, sku="", name="Tube", subcategory_id=_sub(con, "HY", "TUB"),
+                       position_id=_pos(con, "RnD-WH-C-1.1"))
+    c = db.create_item(con, sku="", name="KOH", subcategory_id=_sub(con, "CH", "REA"))
 
-    assert [r["sku"] for r in db.list_items(con, category_id=category)] == ["A-1"]
-    assert [r["sku"] for r in db.list_items(con, area_id=area)] == ["A-1"]
-    assert [r["sku"] for r in db.list_items(con, area_id=other_area)] == ["B-1"]
+    def ids(**f):
+        return {r["item_id"] for r in db.list_items(con, **f)}
+
+    unit_a = db.get_node(con, "position", _pos(con, "RnD-WH-A-0.1"))["unit_id"]
+    wh = db.get_node(con, "unit", unit_a)["area_id"]
+    rnd = db.get_node(con, "area", wh)["facility_id"]
+    assert ids(macro_id=_macro(con, "HY")) == {a, b}
+    assert ids(subcategory_id=_sub(con, "HY", "TUB")) == {b}
+    assert ids(facility_id=rnd) == ids(area_id=wh) == {a, b}
+    assert ids(unit_id=unit_a) == {a}
+    assert ids(macro_id=_macro(con, "HY"), unit_id=unit_a) == {a}
+    assert ids(position_id=_pos(con, "RnD-WH-C-1.1")) == {b}
+    assert c not in ids(facility_id=rnd)
 
 
 def test_an_item_with_no_movements_still_appears(con, item):
@@ -385,11 +434,14 @@ def test_an_item_with_no_movements_still_appears(con, item):
     assert rows[0]["qty"] == 0
 
 
-def test_search_matches_name_sku_and_barcode(con):
-    db.create_item(con, sku="X-1", name="Pasta", barcode="8001234")
+def test_search_matches_name_sku_barcode_tech_ref_and_location(con):
+    db.create_item(con, sku="X-1", name="Pasta", barcode="8001234", tech_ref="VLT-77",
+                   position_id=_pos(con, "RnD-WH-B-0.3"))
     assert len(db.list_items(con, search="Past")) == 1
     assert len(db.list_items(con, search="X-1")) == 1
     assert len(db.list_items(con, search="800123")) == 1
+    assert len(db.list_items(con, search="vlt-7")) == 1
+    assert len(db.list_items(con, search="WH-B-0.3")) == 1
     assert len(db.list_items(con, search="zzz")) == 0
 
 
@@ -434,62 +486,124 @@ def test_availability_without_a_low_qty_threshold_only_has_two_tiers():
     assert db.availability(qty=11, min_qty=10, low_qty=None) == "sufficient"
 
 
-# ------------------------------------------------------- generated SKUs
-def _category(con, name, **kw):
-    return db.create_category(con, db.create_area(con, f"Area {name}"), name, **kw)
+# --------------------------------------------------------- generated codes
+def _family(con, sub, code):
+    return next(f["id"] for f in db.list_nodes(con, "family", sub) if f["code"] == code)
 
 
-def test_prefix_is_suggested_from_the_category_name(con):
-    assert db.get_category(con, _category(con, "Foam"))["prefix"] == "FOAM"
-    assert db.get_category(con, _category(con, "Bipolar Plates"))["prefix"] == "BP"
-    assert db.get_category(con, _category(con, "Membranes"))["prefix"] == "MEMB"
+def test_codes_are_built_from_the_chosen_levels(con):
+    tub, rea, frm = _sub(con, "HY", "TUB"), _sub(con, "CH", "REA"), _sub(con, "ME", "FRM")
+    fl = db.create_node(con, "family", "FL", "Flowframe", frm)
+    assert db.next_sku(con, tub) == "HY-TUB-0001"
+    assert db.next_sku(con, rea, _family(con, rea, "MN")) == "CH-REA-MN-0001"
+    assert db.next_sku(con, frm, fl) == "ME-FRM-FL-0001"
 
 
-def test_taken_prefix_gets_a_numeric_suffix(con):
-    _category(con, "Foam")
-    assert db.get_category(con, _category(con, "Foam rolls"))["prefix"] == "FR"
-    assert db.get_category(con, _category(con, "Foams"))["prefix"] == "FOAM2"
+def test_the_serial_counts_per_full_prefix(con):
+    rea = _sub(con, "CH", "REA")
+    mn, sv = _family(con, rea, "MN"), _family(con, rea, "SV")
+    made = [db.create_item(con, sku="", name=n, subcategory_id=rea, family_id=f)
+            for n, f in (("a", mn), ("b", mn), ("c", sv), ("d", None))]
+    assert [db.get_item(con, i)["sku"] for i in made] == \
+        ["CH-REA-MN-0001", "CH-REA-MN-0002", "CH-REA-SV-0001", "CH-REA-0001"]
 
 
-def test_manual_prefix_is_validated(con):
-    _category(con, "Foam")
-    for bad in ("foam", "ITM", "no way"):
-        with pytest.raises(ValueError):
-            _category(con, f"X{bad}", prefix=bad)
+def test_a_family_alone_implies_its_subcategory(con):
+    rea = _sub(con, "CH", "REA")
+    item = db.create_item(con, sku="", name="KOH", family_id=_family(con, rea, "MN"))
+    assert db.get_item(con, item)["subcategory_id"] == rea
 
 
-def test_blank_sku_is_generated_and_never_reused(con):
-    cat = _category(con, "Fittings")
-    a = db.create_item(con, sku="", name="a", category_id=cat)
-    b = db.create_item(con, sku="", name="b", category_id=cat)
-    assert db.get_item(con, a)["sku"] == "FITT-0001"
-    assert db.get_item(con, b)["sku"] == "FITT-0002"
-    db.update_item(con, b, archived=1)
-    assert db.get_item(con, db.create_item(con, sku="", name="c", category_id=cat))["sku"] == "FITT-0003"
+def test_a_family_must_belong_to_the_subcategory(con):
+    rea = _sub(con, "CH", "REA")
+    with pytest.raises(ValueError, match="different subcategory"):
+        db.create_item(con, sku="", name="x", subcategory_id=_sub(con, "HY", "TUB"),
+                       family_id=_family(con, rea, "MN"))
 
 
-def test_generation_skips_skus_already_in_use(con):
-    cat = _category(con, "Fittings")
-    db.create_item(con, sku="fitt-0001", name="manual", category_id=cat)
-    assert db.get_item(con, db.create_item(con, sku="", name="x", category_id=cat))["sku"] == "FITT-0002"
+def test_preview_does_not_consume_the_number(con):
+    tub = _sub(con, "HY", "TUB")
+    assert db.next_sku(con, tub, reserve=False) == db.next_sku(con, tub, reserve=False)
+    assert db.next_sku(con, tub) == "HY-TUB-0001"
+    assert db.next_sku(con, tub, reserve=False) == "HY-TUB-0002"
 
 
-def test_uncategorised_items_use_the_fallback_prefix(con):
+def test_numbers_are_never_reused_and_taken_codes_are_skipped(con):
+    tub = _sub(con, "HY", "TUB")
+    db.create_item(con, sku="hy-tub-0001", name="typed by hand", subcategory_id=tub)
+    a = db.create_item(con, sku="", name="a", subcategory_id=tub)
+    db.update_item(con, a, archived=1)
+    b = db.create_item(con, sku="", name="b", subcategory_id=tub)
+    assert [db.get_item(con, i)["sku"] for i in (a, b)] == ["HY-TUB-0002", "HY-TUB-0003"]
+
+
+def test_unclassified_items_use_the_fallback_prefix(con):
     a = db.create_item(con, sku="", name="a")
     b = db.create_item(con, sku="", name="b")
     assert [db.get_item(con, i)["sku"] for i in (a, b)] == ["ITM-0001", "ITM-0002"]
 
 
-def test_prefix_locks_once_the_category_has_items(con):
-    cat = _category(con, "Foam")
-    db.update_category(con, cat, prefix="FM")          # still free to change
-    db.create_item(con, sku="", name="a", category_id=cat)
+def test_a_blank_sku_on_edit_asks_for_a_new_code(con):
+    item = db.create_item(con, sku="", name="a")
+    db.update_item(con, item, subcategory_id=_sub(con, "HY", "PIP"))
+    assert db.get_item(con, item)["sku"] == "ITM-0001"        # reclassifying keeps the code
+    db.update_item(con, item, sku="")
+    assert db.get_item(con, item)["sku"] == "HY-PIP-0001"
+
+
+def test_classification_codes_lock_once_items_use_them(con):
+    hy, tub = _macro(con, "HY"), _sub(con, "HY", "TUB")
+    db.update_node(con, "subcategory", tub, code="TBE")           # still free to change
+    db.create_item(con, sku="", name="a", subcategory_id=tub)
+    for kind, node, code in (("subcategory", tub, "ZZZ"), ("macro", hy, "ZZ")):
+        with pytest.raises(ValueError, match="locked"):
+            db.update_node(con, kind, node, code=code)
+    db.update_node(con, "subcategory", tub, code="TBE", name="Tubes")   # same code is fine
+
+
+def test_a_new_subcategory_drops_the_old_family(con):
+    rea, tub = _sub(con, "CH", "REA"), _sub(con, "HY", "TUB")
+    item = db.create_item(con, sku="", name="x", family_id=_family(con, rea, "MN"))
+    db.update_item(con, item, subcategory_id=tub)
+    row = db.get_item(con, item)
+    assert (row["subcategory_id"], row["family_id"]) == (tub, None)
+
+
+def test_clearing_the_subcategory_clears_the_family_too(con):
+    rea = _sub(con, "CH", "REA")
+    item = db.create_item(con, sku="", name="x", family_id=_family(con, rea, "MN"))
+    db.update_item(con, item, subcategory_id=None)
+    row = db.get_item(con, item)
+    assert (row["subcategory_id"], row["family_id"]) == (None, None)
+
+
+def test_the_same_subcategory_keeps_the_family(con):
+    rea = _sub(con, "CH", "REA")
+    mn = _family(con, rea, "MN")
+    item = db.create_item(con, sku="", name="x", family_id=mn)
+    db.update_item(con, item, subcategory_id=rea)
+    assert db.get_item(con, item)["family_id"] == mn
+
+
+def test_a_family_alone_on_edit_implies_its_subcategory(con):
+    rea = _sub(con, "CH", "REA")
+    item = db.create_item(con, sku="", name="x", subcategory_id=_sub(con, "HY", "TUB"))
+    db.update_item(con, item, family_id=_family(con, rea, "SV"))
+    assert db.get_item(con, item)["subcategory_id"] == rea
+
+
+def test_a_location_code_change_only_rewrites_the_positions_below(con):
+    hq = next(f["id"] for f in db.list_nodes(con, "facility") if f["code"] == "HQ")
+    unit = db.create_node(con, "unit", "D", "Drawers", db.create_node(con, "area", "OF", "Office", hq))
+    pos = db.create_node(con, "position", "1.1", "", unit)
+    # Corrupt one stored code elsewhere: a scoped rewrite must leave it alone.
+    other = _pos(con, "RnD-WH-A-0.1")
+    con.execute("UPDATE positions SET location_code = 'STALE' WHERE id = ?", (other,))
+    db.update_node(con, "facility", hq, code="HQX")
+    assert db.get_node(con, "position", pos)["location_code"] == "HQX-OF-D-1.1"
+    assert db.get_node(con, "position", other)["location_code"] == "STALE"
+
+
+def test_filtering_a_top_level_by_parent_is_refused(con):
     with pytest.raises(ValueError):
-        db.update_category(con, cat, prefix="FOAM")
-    db.update_category(con, cat, prefix="FM")          # unchanged value is fine
-
-
-def test_existing_categories_are_backfilled(con):
-    area = db.create_area(con, "Old")
-    con.execute("INSERT INTO categories (area_id, name) VALUES (?, 'Tubing')", (area,))
-    assert [r["prefix"] for r in db.list_categories(con)] == ["TUBI"]
+        db.list_nodes(con, "macro", parent_id=1)

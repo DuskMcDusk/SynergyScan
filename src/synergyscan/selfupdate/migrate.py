@@ -23,7 +23,7 @@ import logging
 import shutil
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def backup(db_path: Path, backups_dir: Path, tag: str = "preupdate") -> Path | N
     if not db_path.exists():
         log.info("no database at %s yet; nothing to back up", db_path)
         return None
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = backups_dir / f"inventory-{tag}-{stamp}.db"
     src = sqlite3.connect(db_path, timeout=30.0)
     try:
@@ -104,7 +104,7 @@ def run() -> dict:
             try:
                 restore(saved, db_path)
                 report["restored"] = True
-            except Exception as re:
+            except Exception as re:  # noqa: BLE001 - any restore failure must be reported
                 # The worst case, and the one that needs a human: say so loudly
                 # and name the file they need.
                 report["restored"] = False

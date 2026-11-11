@@ -19,9 +19,9 @@ import logging
 import queue
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 from .errors import PrinterError
 from .render import render
@@ -34,7 +34,7 @@ JOB_HISTORY = 200        # completed jobs kept for the UI and diagnostics
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 @dataclass

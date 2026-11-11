@@ -15,8 +15,8 @@ from .service import DEFAULT_SIZE, PrintService
 from .spec import Barcode, LabelSize, LabelSpec, PrintResult
 
 __all__ = [
-    "Barcode",
     "DEFAULT_SIZE",
+    "Barcode",
     "LabelSize",
     "LabelSpec",
     "PrintResult",

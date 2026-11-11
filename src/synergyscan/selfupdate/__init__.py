@@ -44,11 +44,11 @@ log = logging.getLogger(__name__)
 RESTART_EXIT_CODE = 75
 
 __all__ = [
+    "RESTART_EXIT_CODE",
     "Applied",
     "ApplyError",
     "BadVersion",
     "CheckError",
-    "RESTART_EXIT_CODE",
     "Release",
     "apply_from_paths",
     "available",

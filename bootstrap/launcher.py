@@ -138,11 +138,11 @@ def run_once(version: str, extra: list[str]) -> int:
     env["PYTHONIOENCODING"] = "utf-8"
     cmd = [str(py), "-m", "synergyscan", *extra]
     log.info("starting release %s", version)
-    return subprocess.run(cmd, cwd=VERSIONS / version, env=env).returncode
+    return subprocess.run(cmd, cwd=VERSIONS / version, env=env, check=False).returncode
 
 
 def configured_port() -> int:
-    """The port from data\config.json, or 8000. Never raises."""
+    r"""The port from data\config.json, or 8000. Never raises."""
     try:
         port = int(json.loads((DATA / "config.json").read_text(encoding="utf-8"))["port"])
         return port if 1 <= port <= 65535 else DEFAULT_PORT

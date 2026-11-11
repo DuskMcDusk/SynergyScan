@@ -17,7 +17,6 @@ Two rules drive everything here.
 
 from __future__ import annotations
 
-
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -77,7 +76,7 @@ def to_1bit(img: Image.Image, dither: bool = False) -> Image.Image:
 
 
 def dots(mm: float) -> int:
-    return int(round(mm * DOTS_PER_MM))
+    return round(mm * DOTS_PER_MM)
 
 
 # --------------------------------------------------------------------- text

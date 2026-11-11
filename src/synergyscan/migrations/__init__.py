@@ -99,7 +99,7 @@ def _apply_pending(con: sqlite3.Connection) -> list[int]:
     done: list[int] = []
     for num, path in pending(con):
         body = path.read_text(encoding="utf-8")
-        if re.search(r"^\s*(BEGIN|COMMIT|ROLLBACK)\b", body, re.I | re.M):
+        if re.search(r"^\s*(BEGIN|COMMIT|ROLLBACK)\b", body, re.IGNORECASE | re.MULTILINE):
             raise ValueError(
                 f"migration {path.name} contains transaction control; "
                 "apply_all manages the transaction itself"

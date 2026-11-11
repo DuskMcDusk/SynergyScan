@@ -16,9 +16,10 @@ import io
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Iterator, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -108,28 +109,32 @@ class ItemIn(BaseModel):
     unit: str = "pcs"
     min_qty: float = 0
     barcode: str | None = None
-    category_id: int | None = None
-    location_id: int | None = None
+    subcategory_id: int | None = None
+    family_id: int | None = None
+    position_id: int | None = None
     supplier: str | None = None
     lead_time_days: int | None = None
     low_qty: float | None = None
     lot: str | None = Field(default=None, max_length=100)
+    tech_ref: str | None = Field(default=None, max_length=100)
 
 
 class ItemPatch(BaseModel):
-    sku: str | None = Field(default=None, min_length=1, max_length=64)
+    sku: str | None = Field(default=None, max_length=64)    # blank = generate again
     name: str | None = None
     description: str | None = None
     unit: str | None = None
     min_qty: float | None = None
     barcode: str | None = None
     archived: bool | None = None
-    category_id: int | None = None
-    location_id: int | None = None
+    subcategory_id: int | None = None
+    family_id: int | None = None
+    position_id: int | None = None
     supplier: str | None = None
     lead_time_days: int | None = None
     low_qty: float | None = None
     lot: str | None = Field(default=None, max_length=100)
+    tech_ref: str | None = Field(default=None, max_length=100)
 
 
 class MovementIn(BaseModel):
@@ -141,36 +146,19 @@ class MovementIn(BaseModel):
     actor: str | None = None
 
 
-class AreaIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+class NodeIn(BaseModel):
+    """A macro-category, subcategory or family, or a facility, area, storage
+    unit or position. parent_id is required for all but the top levels."""
+    parent_id: int | None = None
+    code: str = Field(min_length=1, max_length=8)
+    name: str = Field(default="", max_length=200)
+    note: str | None = Field(default=None, max_length=500)
 
 
-class AreaPatch(BaseModel):
-    name: str | None = None
-    archived: bool | None = None
-
-
-class CategoryIn(BaseModel):
-    area_id: int
-    name: str = Field(min_length=1, max_length=100)
-    prefix: str | None = Field(default=None, max_length=8)   # blank = suggest
-
-
-class CategoryPatch(BaseModel):
-    area_id: int | None = None
-    name: str | None = None
-    archived: bool | None = None
-    prefix: str | None = Field(default=None, max_length=8)
-
-
-class LocationIn(BaseModel):
-    area_id: int
-    name: str = Field(min_length=1, max_length=200)
-
-
-class LocationPatch(BaseModel):
-    area_id: int | None = None
-    name: str | None = None
+class NodePatch(BaseModel):
+    code: str | None = Field(default=None, min_length=1, max_length=8)
+    name: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
     archived: bool | None = None
 
 
@@ -201,8 +189,9 @@ class ScanIn(BaseModel):
 
 
 class PrintIn(BaseModel):
-    """Print either a free-form label or the label for an item."""
+    """Print a free-form label, the label for an item, or a rack position's."""
     item_id: int | None = None
+    position_id: int | None = None
     lines: list[str] = Field(default_factory=list, max_length=6)
     barcode_value: str | None = None
     symbology: Literal["code128", "ean13", "code39", "qr"] = "code128"
@@ -223,6 +212,12 @@ def _spec_for(con: sqlite3.Connection, body: PrintIn) -> tuple[LabelSpec, int | 
             lines = [item["sku"]]       # SKU only, no product name
         if not value:
             value = item["barcode"] or item["sku"]
+    elif body.position_id is not None:
+        pos = db.get_node(con, "position", body.position_id)
+        if pos is None:
+            raise HTTPException(404, f"no position with id {body.position_id}")
+        lines = lines or [pos["location_code"]]
+        value = value or pos["location_code"]
     spec = LabelSpec(
         lines=lines,
         barcode=Barcode(symbology=body.symbology, value=value,
@@ -304,38 +299,47 @@ def _with_availability(item: dict) -> dict:
 @app.get("/api/items")
 def api_items(con: Db, search: str | None = None,
               low: bool = Query(False, description="only items at or below min_qty"),
-              category_id: int | None = None, area_id: int | None = None,
+              macro_id: int | None = None, subcategory_id: int | None = None,
+              family_id: int | None = None, facility_id: int | None = None,
+              area_id: int | None = None, unit_id: int | None = None,
+              position_id: int | None = None,
               archived: bool = Query(False, description="list archived items instead"),
               limit: int = Query(500, le=2000)) -> list[dict]:
     if archived:
         return rows(db.list_archived_items(con))
-    items = rows(db.list_items(con, search=search, low_only=low, limit=limit,
-                               category_id=category_id, area_id=area_id))
+    items = rows(db.list_items(
+        con, search=search, low_only=low, limit=limit, macro_id=macro_id,
+        subcategory_id=subcategory_id, family_id=family_id, facility_id=facility_id,
+        area_id=area_id, unit_id=unit_id, position_id=position_id))
     return [_with_availability(i) for i in items]
 
 
-def _check_item_refs(con: sqlite3.Connection, category_id: int | None,
-                     location_id: int | None) -> None:
-    """category_id/location_id are foreign keys; check them explicitly so a bad
-    id gets a clean 404 instead of surfacing as a confusing SKU/barcode 409."""
-    if category_id is not None and db.get_category(con, category_id) is None:
-        raise HTTPException(404, f"no category with id {category_id}")
-    if location_id is not None and db.get_location(con, location_id) is None:
-        raise HTTPException(404, f"no location with id {location_id}")
-    # A shelf belongs to an area, and an item sits in the area of its category.
-    if category_id is not None and location_id is not None:
-        cat = db.get_category(con, category_id)
-        loc = db.get_location(con, location_id)
-        if loc["area_id"] is not None and loc["area_id"] != cat["area_id"]:
-            raise HTTPException(
-                400, "that location belongs to a different area than the category")
+ITEM_REFS = {"subcategory_id": "subcategory", "family_id": "family", "position_id": "position"}
+
+
+def _check_item_refs(con: sqlite3.Connection, fields: dict,
+                     current: sqlite3.Row | None = None) -> None:
+    """The classification and position are foreign keys; check them explicitly so
+    a bad id gets a clean 404 instead of surfacing as a confusing SKU/barcode 409.
+    An archived entry cannot be newly chosen, but an item that already uses one
+    may keep it. Whether the family fits the subcategory is db.classify's job."""
+    for key, kind in ITEM_REFS.items():
+        node_id = fields.get(key)
+        if node_id is None:
+            continue
+        node = db.get_node(con, kind, node_id)
+        if node is None:
+            raise HTTPException(404, f"no {db.KINDS[kind].label} with id {node_id}")
+        if node["hidden"] and (current is None or current[key] != node_id):
+            raise HTTPException(400, f"that {db.KINDS[kind].label} is archived: "
+                                     "restore it first, or pick another")
 
 
 @app.post("/api/items", status_code=201)
 def api_create_item(body: ItemIn, con: Db) -> dict:
-    _check_item_refs(con, body.category_id, body.location_id)
+    _check_item_refs(con, body.model_dump())
     try:
-        with db.tx(con):       # the SKU counter bump and the insert land together
+        with db.tx(con):       # the code counter bump and the insert land together
             item_id = db.create_item(con, **body.model_dump())
     except sqlite3.IntegrityError as e:
         codes = [c for c in (body.sku.strip(), (body.barcode or "").strip()) if c]
@@ -363,27 +367,28 @@ def api_item(item_id: int, con: Db) -> dict:
     })
 
 
-CLEARABLE_ITEM_FIELDS = {"description", "barcode", "category_id", "location_id",
-                         "supplier", "lead_time_days", "low_qty", "lot"}
+CLEARABLE_ITEM_FIELDS = {"description", "barcode", "subcategory_id", "family_id",
+                         "position_id", "supplier", "lead_time_days", "low_qty", "lot",
+                         "tech_ref"}
 
 
 @app.patch("/api/items/{item_id}")
 def api_patch_item(item_id: int, body: ItemPatch, con: Db) -> dict:
-    if db.get_item(con, item_id) is None:
+    """Change an item. Moving it is just a new position_id; its code never
+    changes unless a new one is asked for by sending a blank sku."""
+    current = db.get_item(con, item_id)
+    if current is None:
         raise HTTPException(404, f"no item with id {item_id}")
     # A field that is sent as null is a request to clear it - but only for the
     # optional ones; a null name, unit or threshold just means "leave it".
     fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
               if v is not None or k in CLEARABLE_ITEM_FIELDS}
-    if "sku" in fields:
-        fields["sku"] = fields["sku"].strip()
-        if not fields["sku"]:
-            raise HTTPException(400, "the SKU cannot be empty")
-    _check_item_refs(con, fields.get("category_id"), fields.get("location_id"))
+    _check_item_refs(con, fields, current)
     if "archived" in fields:
         fields["archived"] = int(bool(fields["archived"]))
     try:
-        db.update_item(con, item_id, **fields)
+        with db.tx(con):       # a regenerated code bumps its counter
+            db.update_item(con, item_id, **fields)
     except sqlite3.IntegrityError as e:
         raise HTTPException(409, f"that SKU or barcode is already in use ({e})") from e
     except ValueError as e:
@@ -391,160 +396,114 @@ def api_patch_item(item_id: int, body: ItemPatch, con: Db) -> dict:
     return dict(db.get_item(con, item_id))        # type: ignore[arg-type]
 
 
-# -------------------------------------------------------------------- areas
-@app.get("/api/areas")
-def api_areas(con: Db, include_archived: bool = False) -> list[dict]:
-    return rows(db.list_areas(con, include_archived=include_archived))
-
-
-@app.post("/api/areas", status_code=201)
-def api_create_area(body: AreaIn, con: Db) -> dict:
-    try:
-        area_id = db.create_area(con, **body.model_dump())
-    except sqlite3.IntegrityError as e:
-        raise _taken(con, "area", "SELECT 1 FROM areas WHERE name = ? COLLATE NOCASE",
-                     (body.name.strip(),)) from e
-    return dict(db.get_area(con, area_id))         # type: ignore[arg-type]
-
-
-@app.patch("/api/areas/{area_id}")
-def api_patch_area(area_id: int, body: AreaPatch, con: Db) -> dict:
-    if db.get_area(con, area_id) is None:
-        raise HTTPException(404, f"no area with id {area_id}")
-    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
-              if v is not None}
-    archived = fields.pop("archived", None)
-    try:
-        with db.tx(con):
-            db.update_area(con, area_id, **fields)
-            if archived is not None:
-                db.set_area_archived(con, area_id, bool(archived))
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(409, f"that area name is already in use ({e})") from e
-    return dict(db.get_area(con, area_id))         # type: ignore[arg-type]
-
-
-def _taken(con: sqlite3.Connection, what: str, sql: str, args: tuple) -> HTTPException:
-    """A 409 for a name/SKU clash. Archived rows still hold their name, so say so
-    when that is the cause - otherwise the clash is invisible in the UI."""
-    if con.execute(sql + " AND archived = 1", args).fetchone():
-        return HTTPException(409, f"an archived {what} already uses that - "
-                                  "restore it from the Archive page instead")
-    return HTTPException(409, f"that {what} name is already in use")
-
-
-def _check_area_active(con: sqlite3.Connection, area_id: int | None) -> None:
-    """A category or shelf cannot come back while its area is still archived."""
-    area = db.get_area(con, area_id) if area_id is not None else None
-    if area is not None and area["archived"]:
-        raise HTTPException(400, f"the area {area['name']!r} is archived: restore it first")
-
-
-# ---------------------------------------------------------------- categories
-@app.get("/api/categories")
-def api_categories(con: Db, area_id: int | None = None,
-                   include_archived: bool = False) -> list[dict]:
-    return rows(db.list_categories(con, area_id=area_id, include_archived=include_archived))
-
-
 @app.get("/api/next-sku")
-def api_next_sku(con: Db, category_id: int | None = None) -> dict:
-    """Preview of the SKU a new item in this category would get."""
-    _check_item_refs(con, category_id, None)
-    return {"sku": db.next_sku(con, category_id, reserve=False)}
-
-
-@app.get("/api/categories/suggest-prefix")
-def api_suggest_prefix(name: str, con: Db) -> dict:
-    return {"prefix": db.suggest_prefix(con, name)}
-
-
-@app.post("/api/categories", status_code=201)
-def api_create_category(body: CategoryIn, con: Db) -> dict:
-    if db.get_area(con, body.area_id) is None:
-        raise HTTPException(404, f"no area with id {body.area_id}")
+def api_next_sku(con: Db, subcategory_id: int | None = None,
+                 family_id: int | None = None) -> dict:
+    """Preview of the code a new item with this classification would get."""
+    _check_item_refs(con, {"subcategory_id": subcategory_id, "family_id": family_id})
     try:
-        category_id = db.create_category(con, **body.model_dump())
-    except sqlite3.IntegrityError as e:
-        raise _taken(con, "category",
-                     "SELECT 1 FROM categories WHERE area_id = ? AND name = ? COLLATE NOCASE",
-                     (body.area_id, body.name.strip())) from e
+        return {"sku": db.next_sku(con, subcategory_id, family_id, reserve=False)}
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
 
 
-@app.patch("/api/categories/{category_id}")
-def api_patch_category(category_id: int, body: CategoryPatch, con: Db) -> dict:
-    if db.get_category(con, category_id) is None:
-        raise HTTPException(404, f"no category with id {category_id}")
-    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
-              if v is not None}
-    if "area_id" in fields and db.get_area(con, fields["area_id"]) is None:
-        raise HTTPException(404, f"no area with id {fields['area_id']}")
-    if fields.get("archived") is False:
-        _check_area_active(con, fields.get("area_id",
-                                          db.get_category(con, category_id)["area_id"]))
-    if "archived" in fields:
-        fields["archived"] = int(bool(fields["archived"]))
-    try:
-        db.update_category(con, category_id, **fields)
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(409, f"that category name is already in use in this area ({e})") from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    return dict(db.get_category(con, category_id))  # type: ignore[arg-type]
+# --------------------------------------------- classification and locations
+# Seven kinds of node, one set of routes each: GET/POST /api/<plural> and
+# PATCH /api/<plural>/{id}. Registered in a loop so they cannot drift apart.
+NODE_ROUTES = {
+    "macros": "macro", "subcategories": "subcategory", "families": "family",
+    "facilities": "facility", "areas": "area", "units": "unit", "positions": "position",
+}
 
 
-# ----------------------------------------------------------------- locations
-@app.get("/api/locations")
-def api_locations(con: Db, include_archived: bool = False) -> list[dict]:
-    return rows(db.list_locations(con, include_archived=include_archived))
+def _node_or_404(con: sqlite3.Connection, kind: str, node_id: int) -> sqlite3.Row:
+    row = db.get_node(con, kind, node_id)
+    if row is None:
+        raise HTTPException(404, f"no {db.KINDS[kind].label} with id {node_id}")
+    return row
 
 
-@app.post("/api/locations", status_code=201)
-def api_create_location(body: LocationIn, con: Db) -> dict:
-    if db.get_area(con, body.area_id) is None:
-        raise HTTPException(404, f"no area with id {body.area_id}")
-    try:
-        location_id = db.create_location(con, **body.model_dump())
-    except sqlite3.IntegrityError as e:
-        raise _taken(con, "location",
-                     "SELECT 1 FROM locations WHERE area_id = ? AND name = ? COLLATE NOCASE",
-                     (body.area_id, body.name.strip())) from e
-    return dict(db.get_location(con, location_id))  # type: ignore[arg-type]
+def _code_taken(kind: str, e: sqlite3.IntegrityError) -> HTTPException:
+    """A 409 for a code clash. Archived rows keep their code, so point there -
+    otherwise the clash is invisible in Setup."""
+    k = db.KINDS[kind]
+    if "location_code" in str(e):
+        return HTTPException(409, "another position already has that location code")
+    where = f" in this {db.KINDS[k.parent].label}" if k.parent else ""
+    return HTTPException(409, f"that {k.label} code is already in use{where} "
+                              "(an archived one keeps its code: see the Archive page)")
 
 
-@app.patch("/api/locations/{location_id}")
-def api_patch_location(location_id: int, body: LocationPatch, con: Db) -> dict:
-    if db.get_location(con, location_id) is None:
-        raise HTTPException(404, f"no location with id {location_id}")
-    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
-              if v is not None}
-    if "area_id" in fields and db.get_area(con, fields["area_id"]) is None:
-        raise HTTPException(404, f"no area with id {fields['area_id']}")
-    if fields.get("archived") is False:
-        _check_area_active(con, fields.get("area_id",
-                                          db.get_location(con, location_id)["area_id"]))
-    if "archived" in fields:
-        fields["archived"] = int(bool(fields["archived"]))
-    try:
-        db.update_location(con, location_id, **fields)
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(409, f"that location name is already in use in this area ({e})") from e
-    return dict(db.get_location(con, location_id))  # type: ignore[arg-type]
+def _node_routes(kind: str, plural: str) -> None:
+    k = db.KINDS[kind]
+
+    def list_(con: Db, parent_id: int | None = None,
+              include_archived: bool = False) -> list[dict]:
+        try:
+            return rows(db.list_nodes(con, kind, parent_id, include_archived))
+        except ValueError as e:          # parent_id on a top level
+            raise HTTPException(400, str(e)) from e
+
+    def create(body: NodeIn, con: Db) -> dict:
+        if k.parent:
+            if body.parent_id is None:
+                raise HTTPException(400, f"a {k.label} needs a {db.KINDS[k.parent].label}")
+            _node_or_404(con, k.parent, body.parent_id)
+        try:
+            with db.tx(con):
+                node_id = db.create_node(con, kind, body.code, body.name,
+                                         body.parent_id if k.parent else None, body.note)
+        except sqlite3.IntegrityError as e:
+            raise _code_taken(kind, e) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return dict(_node_or_404(con, kind, node_id))
+
+    def patch(node_id: int, body: NodePatch, con: Db) -> dict:
+        current = _node_or_404(con, kind, node_id)
+        # A null note clears it; any other null means "leave it".
+        fields = {f: v for f, v in body.model_dump(exclude_unset=True).items()
+                  if v is not None or f == "note"}
+        if fields.get("archived") is False and k.parent:
+            parent = _node_or_404(con, k.parent, current["parent_id"])
+            if parent["hidden"]:
+                raise HTTPException(400, f"the {db.KINDS[k.parent].label} "
+                                         f"{parent['code']} is archived: restore it first")
+        if "archived" in fields:
+            fields["archived"] = int(bool(fields["archived"]))
+        try:
+            with db.tx(con):     # a location code change rewrites the rack codes below it
+                db.update_node(con, kind, node_id, **fields)
+        except sqlite3.IntegrityError as e:
+            raise _code_taken(kind, e) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return dict(_node_or_404(con, kind, node_id))
+
+    app.add_api_route(f"/api/{plural}", list_, methods=["GET"], name=f"list_{plural}")
+    app.add_api_route(f"/api/{plural}", create, methods=["POST"], status_code=201,
+                      name=f"create_{kind}")
+    app.add_api_route(f"/api/{plural}/{{node_id}}", patch, methods=["PATCH"],
+                      name=f"patch_{kind}")
+
+
+for _plural, _kind in NODE_ROUTES.items():
+    _node_routes(_kind, _plural)
 
 
 # --------------------------------------------------------------------- scan
 @app.post("/api/scan")
 def api_scan(body: ScanIn, con: Db) -> dict:
-    """Resolve a scanned code to an item.
+    """Resolve a scanned code to an item, or to a rack position.
 
     A miss is a normal outcome, not an error: the UI offers to create the item,
     which is how a new product gets into the system at the receiving bench.
     """
     item = db.find_by_code(con, body.code)
     if item is None:
+        position = db.find_position(con, body.code)
+        if position is not None:          # a rack label: the UI moves the open item there
+            return {"found": False, "code": body.code.strip(), "position": dict(position)}
         archived = db.find_archived_by_code(con, body.code)
         if archived is not None:
             return {"found": False, "code": body.code.strip(),

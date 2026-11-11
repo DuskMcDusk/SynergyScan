@@ -360,6 +360,7 @@ tbody tr:last-child td { border-bottom: none; }
 .grid { display: grid; gap: 14px; align-items: end; }
 .g-what  { grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 0.8fr); }
 .g-where { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); }
+.g-where4 { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); }
 .g-two   { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .g-three { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); }
 .cascade {
@@ -370,6 +371,7 @@ tbody tr:last-child td { border-bottom: none; }
 .field label { font-size: 0.875rem; font-weight: 600; color: var(--ink-2); }
 .field input, .field select { width: 100%; }
 .hint { margin-top: 10px; font-size: 0.875rem; color: var(--ink-2); }
+.hint.center { text-align: center; margin-top: 14px; }
 
 .label-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
 .label-options { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
@@ -390,11 +392,19 @@ tbody tr:last-child td { border-bottom: none; }
 
 .form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 #archived-hit p { margin: 10px 0 0; }
+#pos-code { font-size: 1.625rem; letter-spacing: 0.02em; }
+.pos-note { margin: 8px 0 14px; font-size: 0.9375rem; }
+#pos-items td.num { white-space: nowrap; }
 #archived-hit .form-actions { border-top: 0; padding-top: 0; margin-top: 18px; }
 
 /* ------------------------------------------------------------------ stock */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 #search { width: 260px; }
+/* One group per tree, so the two cascades read as separate filters. */
+.filter-set { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-set select { width: 190px; }
+.filter-set #filter-macro { width: 230px; }
+.filter-set select:disabled { opacity: 0.55; }
 .chips { display: flex; gap: 8px; }
 .chip {
   min-height: 40px; padding: 0 14px; border-radius: 999px;
@@ -417,6 +427,7 @@ tbody tr:last-child td { border-bottom: none; }
 .stock .item-cell strong { display: block; font-weight: 600; }
 .stock .item-cell span, .stock .where-cell span { display: block; font-size: 0.875rem; color: var(--ink-2); }
 .stock .where-cell { color: var(--ink); }
+.stock .where-cell .loc { font-family: var(--font-head); letter-spacing: 0.02em; }
 .stock .qty-cell { font: 600 1.0625rem var(--font-head); white-space: nowrap; }
 .stock .qty-cell small { font: 400 0.875rem var(--font-body); color: var(--ink-2); margin-left: 4px; }
 .stock tr.reorder .qty-cell { color: var(--bad); }
@@ -431,35 +442,78 @@ tbody tr:last-child td { border-bottom: none; }
 .meter i.zero { background: var(--bad); }
 .no-level { color: var(--line-strong); }
 
-/* ------------------------------------------------------------------ setup */
-.inline-add { display: flex; gap: 8px; align-items: center; }
-.inline-add input { flex: 1; min-width: 0; }
-.page-head .inline-add input { width: 280px; }
-
-#setup-areas { display: flex; flex-direction: column; gap: 16px; }
-.area-block { padding: 0; overflow: hidden; }
-.area-head {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+/* ------------------------------------------------------------------ setup
+   Two folding trees. A row is code + name; everything editable opens the same
+   dialog, so the rows carry only quiet ghost buttons and small chips. */
+.tree-panel { padding: 0; overflow: hidden; }
+.tree-head {
+  display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
   padding: 16px 24px; border-bottom: 1px solid var(--line);
 }
-.area-head h3 { font-size: 1.25rem; }
-.area-head .muted { font-size: 0.875rem; }
-.area-cols { display: grid; grid-template-columns: 1fr 1fr; }
-.area-col { padding: 16px 24px 20px; min-width: 0; }
-.area-col + .area-col { border-left: 1px solid var(--line); }
-.area-col h4 { font: 600 0.9375rem var(--font-head); margin-bottom: 8px; }
-.entries { list-style: none; margin: 0 0 12px; padding: 0; }
-.entries li {
-  display: flex; align-items: center; gap: 10px; min-height: 40px;
-  border-bottom: 1px solid var(--line);
+.tree-head h3 { font-size: 1.25rem; }
+.tree-head p { margin-top: 2px; }
+.tree-panel > div > .none { padding: 16px 24px; }
+
+.tree-node { border-bottom: 1px solid var(--line); }
+.tree-node:last-child { border-bottom: 0; }
+.tree-node > summary {
+  display: flex; align-items: center; gap: 12px; min-height: 54px;
+  padding: 8px 24px 8px 46px; cursor: pointer; list-style: none; position: relative;
 }
+.tree-node > summary::-webkit-details-marker { display: none; }
+.tree-node > summary::before {          /* the same chevron as the sidebar tree */
+  content: ""; position: absolute; left: 22px; top: 50%; width: 7px; height: 7px;
+  border-right: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2);
+  transform: translateY(-50%) rotate(-45deg); transition: transform 0.15s;
+}
+.tree-node[open] > summary::before { transform: translateY(-70%) rotate(45deg); }
+.tree-node > summary:hover, .tree-node[open] > summary {
+  background: color-mix(in srgb, var(--page) 45%, var(--surface));
+}
+.tree-node > summary .name { font: 600 1rem var(--font-head); }
+.tree-body { padding: 6px 24px 18px 46px; }
+.tree-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tree-actions .ghost:first-child { border-color: var(--line-strong); color: var(--ink); }
+
+.entries { list-style: none; margin: 0; padding: 0; }
+/* Code | name, examples and families | item count | Edit, on one line at any width. */
+.entries li {
+  display: flex; align-items: flex-start; gap: 12px; min-height: 48px;
+  padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.entries li > code, .entries li > .muted, .entries li > .ghost { margin-top: 2px; flex: none; }
+.entries li > .muted { margin-top: 6px; }
+.entries li > code { min-width: 3.6em; text-align: center; }
 .entries li:last-child { border-bottom: 0; }
 .entries .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.entries .none { color: var(--ink-2); font-size: 0.9375rem; }
-.area-col .inline-add .prefix { flex: 0 0 96px; text-transform: uppercase; }
-.area-col .inline-add .prefix::placeholder { text-transform: none; }
-.unassigned { border-style: dashed; }
-.unassigned select { height: 34px; font-size: 0.875rem; }
+.entries .name small { display: block; color: var(--ink-2); font-size: 0.8125rem; }
+.chips-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.chips-inline .ghost { min-height: 30px; padding-left: 0; }
+.chips-inline .node-chip + .ghost { padding-left: 10px; }
+.node-chip {
+  min-height: 30px; padding: 0 10px; border-radius: 999px;
+  font-size: 0.8125rem; font-weight: 600;
+  background: var(--page); border-color: var(--line); color: var(--ink);
+}
+
+.loc-area + .loc-area { margin-top: 14px; }
+.loc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 42px; }
+.loc-head .name { font-weight: 600; }
+.loc-unit {
+  margin-top: 8px; padding: 8px 14px 14px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+/* A storage unit drawn as its rack: top level first, positions left to right. */
+.rack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.rack-level { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.rack-label { flex: 0 0 4.5em; font-size: 0.8125rem; color: var(--ink-2); }
+.pos-chip {
+  min-width: 64px; min-height: 40px; border-radius: var(--r-sm);
+  font: 600 0.9375rem var(--font-head); font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.pos-chip.used { background: var(--surface); border-color: var(--line-strong); }
+.pos-chip small { font: 600 0.75rem var(--font-body); color: var(--ink-2); }
 
 /* ---------------------------------------------------------------- archive */
 #view-archive .panel-title { margin-bottom: 4px; }
@@ -500,6 +554,10 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .overlay-box h2 { font-size: 1.25rem; margin: 0 0 8px; }
 .overlay-box p { margin: 0 0 22px; }
+.overlay-form { display: flex; flex-direction: column; gap: 14px; margin: 6px 0 22px; }
+.overlay-form .hint { margin: 0; }
+.overlay-form input:disabled { opacity: 0.6; }
+.row.wrap { flex-wrap: wrap; }
 .overlay-box .spinner:not([hidden]) + h2 { margin-top: 16px; }
 .spinner {
   width: 34px; height: 34px; border-radius: 50%;
@@ -531,15 +589,20 @@ tbody tr:last-child td { border-bottom: none; }
                    border-left: 0; border-bottom: 3px solid transparent; }
   .nav-link.main.on { border-bottom-color: var(--yellow); }
   .content { padding: 20px 16px 40px; }
-  .area-cols { grid-template-columns: 1fr; }
-  .area-col + .area-col { border-left: 0; border-top: 1px solid var(--line); }
   .label-layout { grid-template-columns: 1fr; }
+  .g-where4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g-where4 > .cascade { display: none; }
 }
 
 @media (max-width: 600px) {
   .page-head h2 { font-size: 1.5rem; }
-  .panel:not(.flush):not(.area-block) { padding: 16px; }
-  .area-head, .area-col { padding-left: 16px; padding-right: 16px; }
+  .panel:not(.flush):not(.tree-panel) { padding: 16px; }
+  .tree-head { padding: 14px 16px; }
+  .tree-node > summary { padding-right: 16px; padding-left: 38px; flex-wrap: wrap; }
+  .tree-node > summary::before { left: 16px; }
+  .tree-node > summary .push-right { margin-left: 0; flex-basis: 100%; }
+  .tree-body { padding: 4px 16px 16px; }
+  .loc-unit { padding: 6px 10px 12px; }
   body[data-view="scan"] #scan { height: 68px; font-size: 1.375rem; }
   body[data-view="scan"] .reticle { padding: 10px; }
   .item-top { flex-direction: column; gap: 16px; }
@@ -548,11 +611,10 @@ tbody tr:last-child td { border-bottom: none; }
   .actions button { min-height: 60px; font-size: 1.0625rem; }
   .g-what, .g-three { grid-template-columns: 1fr 1fr; }
   .g-what .field:first-child, .g-three .field:first-child { grid-column: 1 / -1; }
-  .g-where { grid-template-columns: 1fr; }
+  .g-where, .g-where4 { grid-template-columns: 1fr; }
   .cascade { display: none; }
-  #search, .page-head .inline-add input { width: 100%; }
-  .toolbar, .page-head .inline-add { width: 100%; }
-  .toolbar select { flex: 1; }
+  #search, .toolbar, .filter-set { width: 100%; }
+  .toolbar select { flex: 1; min-width: 0; }
   /* Each stock row becomes a two-line card: item and quantity on top, where
      it is kept and the actions below. Level and reorder point drop out. */
   .stock thead { display: none; }

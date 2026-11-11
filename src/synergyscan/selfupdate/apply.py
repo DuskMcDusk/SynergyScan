@@ -180,7 +180,7 @@ def build_venv(release_dir: Path, uv: Path) -> None:
     log.info("building environment for %s", release_dir.name)
     r = subprocess.run(
         [str(uv), "sync", "--frozen", "--no-dev"],
-        cwd=release_dir, capture_output=True, text=True, timeout=UV_SYNC_TIMEOUT,
+        cwd=release_dir, capture_output=True, text=True, timeout=UV_SYNC_TIMEOUT, check=False,
     )
     if r.returncode != 0:
         raise ApplyError(
@@ -198,7 +198,7 @@ def _run_module(release_dir: Path, module: str, timeout: int) -> str:
     env["PYTHONIOENCODING"] = "utf-8"
     r = subprocess.run(
         [str(py), "-m", module],
-        cwd=release_dir, capture_output=True, text=True, timeout=timeout, env=env,
+        cwd=release_dir, capture_output=True, text=True, timeout=timeout, env=env, check=False,
     )
     out = (r.stdout or "").strip()
     if r.returncode != 0:

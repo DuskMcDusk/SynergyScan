@@ -18,8 +18,8 @@ import os
 import platform
 import sqlite3
 import sys
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from . import config, db, logs, paths
 from .selfupdate import version as relver
@@ -28,7 +28,7 @@ from .selfupdate import version as relver
 def _safe(fn: Callable[[], object]) -> object:
     try:
         return fn()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - a support report must never crash
         return f"<failed: {type(e).__name__}: {e}>"
 
 
@@ -43,8 +43,8 @@ def _versions() -> dict:
         "install_root": str(paths.install_root() or "-"),
         "pointer": str(paths.current_pointer() or "-"),
         "pointer_says": _safe(
-            lambda: (paths.current_pointer().read_text(encoding="utf-8").strip()
-                     if paths.current_pointer() else "-")
+            lambda: (pointer.read_text(encoding="utf-8").strip()
+                     if (pointer := paths.current_pointer()) else "-")
         ),
         "installed_versions": _safe(
             lambda: sorted(d.name for d in (paths.versions_dir() or paths.release_dir())
@@ -60,7 +60,7 @@ def _machine() -> dict:
         "machine": platform.machine(),
         "hostname": platform.node(),
         "user": os.environ.get("USERNAME") or os.environ.get("USER") or "-",
-        "now_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "now_utc": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 
@@ -80,7 +80,7 @@ def _database(con: sqlite3.Connection | None) -> dict:
         out["counts"] = db.counts(con)
         out["integrity"] = con.execute("PRAGMA integrity_check").fetchone()[0]
         out["journal_mode"] = con.execute("PRAGMA journal_mode").fetchone()[0]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - report the failure, don't raise
         out["error"] = f"{type(e).__name__}: {e}"
     finally:
         if own and con is not None:
