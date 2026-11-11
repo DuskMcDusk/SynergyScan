@@ -1,6 +1,6 @@
 {
-  "version": "2026.10.08-2",
-  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.10.08-2/synergyscan-2026.10.08-2.zip",
-  "sha256": "dee50554d877f1daacff7e83c5b83201e0c7d3ab8c7fd4319cc28b0de3264686",
-  "notes": ""
+  "version": "2026.11.11-1",
+  "url": "https://github.com/DuskMcDusk/SynergyScan/releases/download/v2026.11.11-1/synergyscan-2026.11.11-1.zip",
+  "sha256": "139a6bb3b4f46bbb692a425efb6e52d87068d312011e325320a60f463ba31c7f",
+  "notes": "Classification and location trees; update and rollback hardening"
 }
