@@ -83,15 +83,14 @@ def test_low_stock_filter(client):
 
 
 def test_item_response_includes_the_new_master_fields_and_availability(client):
-    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
-    category = client.post("/api/categories",
-                           json={"area_id": area["id"], "name": "Electrodes"}).json()
+    sub = _node(client, "subcategories", "FOM")
     item = client.post("/api/items", json={
-        "sku": "FOAM-001", "name": "Fe foam", "category_id": category["id"],
+        "name": "Fe foam", "subcategory_id": sub["id"], "tech_ref": "V-99",
         "supplier": "Supplier A", "lead_time_days": 30, "min_qty": 5,
         "low_qty": 8,
     }).json()
-    assert item["category_id"] == category["id"]
+    assert (item["sku"], item["subcategory_id"]) == ("CH-FOM-0001", sub["id"])
+    assert item["tech_ref"] == "V-99"
     assert item["supplier"] == "Supplier A"
 
     full = client.get(f"/api/items/{item['id']}").json()
@@ -99,10 +98,17 @@ def test_item_response_includes_the_new_master_fields_and_availability(client):
     assert "lots" in full
 
 
-def test_creating_an_item_with_an_unknown_category_is_a_404(client):
-    r = client.post("/api/items", json={"sku": "A-1", "name": "Widget",
-                                        "category_id": 999})
+@pytest.mark.parametrize("field", ["subcategory_id", "family_id", "position_id"])
+def test_creating_an_item_with_an_unknown_reference_is_a_404(client, field):
+    r = client.post("/api/items", json={"sku": "A-1", "name": "Widget", field: 999})
     assert r.status_code == 404
+
+
+def test_a_family_from_another_subcategory_is_refused(client):
+    r = client.post("/api/items", json={
+        "name": "x", "family_id": _node(client, "families", "MN")["id"],
+        "subcategory_id": _node(client, "subcategories", "TUB")["id"]})
+    assert r.status_code == 400
 
 
 def test_low_and_reorder_tiers_appear_in_the_items_list(client):
@@ -121,105 +127,102 @@ def test_low_and_reorder_tiers_appear_in_the_items_list(client):
     assert client.get("/api/items").json()[0]["availability"] == "sufficient"
 
 
-def test_items_can_be_filtered_by_category(client):
-    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
-    category = client.post("/api/categories",
-                           json={"area_id": area["id"], "name": "Electrodes"}).json()
-    client.post("/api/items", json={"sku": "A-1", "name": "In category",
-                                    "category_id": category["id"]})
-    client.post("/api/items", json={"sku": "B-1", "name": "Uncategorised"})
-    rows = client.get(f"/api/items?category_id={category['id']}").json()
-    assert [x["sku"] for x in rows] == ["A-1"]
+def test_items_can_be_filtered_by_classification_and_location(client):
+    tub, pmp = _node(client, "subcategories", "TUB"), _node(client, "subcategories", "PMP")
+    pos_a = _position(client, "RnD-WH-A-0.1")
+    pos_c = _position(client, "RnD-WH-C-1.1")
+    client.post("/api/items", json={"name": "Tube", "subcategory_id": tub["id"],
+                                    "position_id": pos_c["id"]})
+    client.post("/api/items", json={"name": "Pump", "subcategory_id": pmp["id"],
+                                    "position_id": pos_a["id"]})
+    client.post("/api/items", json={"sku": "B-1", "name": "Unclassified"})
+
+    def names(query):
+        return sorted(x["name"] for x in client.get(f"/api/items?{query}").json())
+
+    assert names(f"macro_id={tub['macro_id']}") == ["Pump", "Tube"]
+    assert names(f"subcategory_id={tub['id']}") == ["Tube"]
+    assert names(f"unit_id={pos_a['unit_id']}") == ["Pump"]
+    assert names(f"macro_id={tub['macro_id']}&unit_id={pos_c['unit_id']}") == ["Tube"]
+    row = client.get(f"/api/items?position_id={pos_c['id']}").json()[0]
+    assert row["location_code"] == "RnD-WH-C-1.1"
 
 
-# -------------------------------------------------------------------- areas
-def test_create_and_list_areas(client):
-    r = client.post("/api/areas", json={"name": "Battery Testing"})
+# --------------------------------------------- classification and locations
+def _node(client, plural, code):
+    return next(n for n in client.get(f"/api/{plural}").json() if n["code"] == code)
+
+
+def _position(client, location_code):
+    return next(p for p in client.get("/api/positions").json()
+                if p["location_code"] == location_code)
+
+
+def test_the_preloaded_lists_are_served(client):
+    assert len(client.get("/api/macros").json()) == 5
+    assert len(client.get("/api/subcategories").json()) == 56
+    assert len(client.get("/api/families").json()) == 6
+    assert len(client.get("/api/facilities").json()) == 3
+    assert len(client.get("/api/positions").json()) == 44
+    hy = _node(client, "macros", "HY")
+    assert len(client.get(f"/api/subcategories?parent_id={hy['id']}").json()) == 14
+
+
+def test_setup_can_add_and_edit_subcategories_and_families(client):
+    """The lists are refined in Setup, not by a new release."""
+    me = _node(client, "macros", "ME")
+    r = client.post("/api/subcategories", json={"parent_id": me["id"], "code": "brg",
+                                                "name": "Bearings", "note": "Ball bearings"})
+    assert r.status_code == 201 and r.json()["code"] == "BRG"
+    fam = client.post("/api/families", json={"parent_id": r.json()["id"], "code": "BB",
+                                             "name": "Ball"}).json()
+    r = client.patch(f"/api/families/{fam['id']}", json={"name": "Ball bearings", "note": None})
+    assert r.status_code == 200 and r.json()["name"] == "Ball bearings"
+
+
+@pytest.mark.parametrize("plural,body,status", [
+    ("subcategories", {"code": "ABC", "name": "No parent"}, 400),
+    ("subcategories", {"parent_id": 999, "code": "ABC", "name": "Bad parent"}, 404),
+    ("macros", {"code": "ABC", "name": "Too long"}, 400),
+    ("macros", {"code": "EL", "name": "Taken"}, 409),
+    ("facilities", {"code": "rnd", "name": "Taken, ignoring case"}, 409),
+    ("macros", {"code": "XY"}, 400),                       # no name
+])
+def test_bad_nodes_are_refused_cleanly(client, plural, body, status):
+    assert client.post(f"/api/{plural}", json=body).status_code == status
+
+
+def test_patching_a_missing_node_is_a_404(client):
+    assert client.patch("/api/units/999", json={"name": "x"}).status_code == 404
+
+
+def test_a_new_position_gets_its_location_code(client):
+    unit = _position(client, "RnD-WH-B-0.1")["unit_id"]
+    r = client.post("/api/positions", json={"parent_id": unit, "code": "5.1",
+                                            "note": "Top shelf, new"})
     assert r.status_code == 201
-    assert [a["name"] for a in client.get("/api/areas").json()] == ["Battery Testing"]
+    assert r.json()["location_code"] == "RnD-WH-B-5.1"
+    again = client.post("/api/positions", json={"parent_id": unit, "code": "5.1"})
+    assert again.status_code == 409
 
 
-def test_duplicate_area_name_is_a_conflict(client):
-    client.post("/api/areas", json={"name": "Chemistry"})
-    r = client.post("/api/areas", json={"name": "Chemistry"})
-    assert r.status_code == 409
-
-
-def test_patching_a_missing_area_is_a_404(client):
-    assert client.patch("/api/areas/999", json={"name": "x"}).status_code == 404
-
-
-# ---------------------------------------------------------------- categories
-def test_create_and_list_categories(client):
-    area = client.post("/api/areas", json={"name": "Battery Testing"}).json()
-    r = client.post("/api/categories", json={"area_id": area["id"], "name": "Electrodes"})
-    assert r.status_code == 201
-    assert [c["name"] for c in client.get("/api/categories").json()] == ["Electrodes"]
-
-
-def test_creating_a_category_needs_a_real_area(client):
-    r = client.post("/api/categories", json={"area_id": 999, "name": "Electrodes"})
-    assert r.status_code == 404
-
-
-def test_list_categories_filtered_by_area(client):
-    a = client.post("/api/areas", json={"name": "Battery Testing"}).json()
-    b = client.post("/api/areas", json={"name": "Chemistry"}).json()
-    client.post("/api/categories", json={"area_id": a["id"], "name": "Electrodes"})
-    client.post("/api/categories", json={"area_id": b["id"], "name": "Solvents"})
-    rows = client.get(f"/api/categories?area_id={a['id']}").json()
-    assert [c["name"] for c in rows] == ["Electrodes"]
-
-
-# ----------------------------------------------------------------- locations
-def _area(client, name="Area A"):
-    return client.post("/api/areas", json={"name": name}).json()
-
-
-def test_create_and_list_locations(client):
-    a = _area(client)
-    r = client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf D1"})
-    assert r.status_code == 201
-    assert r.json()["area_id"] == a["id"]
-    assert [l["name"] for l in client.get("/api/locations").json()] == ["Shelf D1"]
-
-
-def test_a_location_needs_an_area(client):
-    assert client.post("/api/locations", json={"name": "Shelf"}).status_code == 422
-    r = client.post("/api/locations", json={"area_id": 999, "name": "Shelf"})
-    assert r.status_code == 404
-
-
-def test_patch_updates_a_location(client):
-    a = _area(client)
-    loc = client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf D1"}).json()
-    r = client.patch(f"/api/locations/{loc['id']}", json={"name": "Shelf D1 (top)"})
+def test_a_classification_code_locks_once_an_item_uses_it(client):
+    tub = _node(client, "subcategories", "TUB")
+    client.post("/api/items", json={"name": "Tube", "subcategory_id": tub["id"]})
+    r = client.patch(f"/api/subcategories/{tub['id']}", json={"code": "TBE"})
+    assert r.status_code == 400 and "locked" in r.json()["detail"]
+    r = client.patch(f"/api/subcategories/{tub['id']}", json={"name": "Tubing"})
     assert r.status_code == 200
-    assert r.json()["name"] == "Shelf D1 (top)"
 
 
-def test_the_same_shelf_name_can_exist_in_two_areas(client):
-    a, b = _area(client, "Area A"), _area(client, "Area B")
-    assert client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf 1"}).status_code == 201
-    assert client.post("/api/locations", json={"area_id": b["id"], "name": "Shelf 1"}).status_code == 201
-
-
-def test_duplicate_location_name_in_one_area_is_a_conflict(client):
-    a = _area(client)
-    client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf D1"})
-    r = client.post("/api/locations", json={"area_id": a["id"], "name": "shelf d1"})
-    assert r.status_code == 409
-
-
-def test_an_item_cannot_sit_in_another_areas_shelf(client):
-    a, b = _area(client, "Area A"), _area(client, "Area B")
-    cat = client.post("/api/categories", json={"area_id": a["id"], "name": "Foam"}).json()
-    other = client.post("/api/locations", json={"area_id": b["id"], "name": "Shelf 1"}).json()
-    own = client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf 1"}).json()
-    bad = client.post("/api/items", json={"name": "X", "category_id": cat["id"], "location_id": other["id"]})
-    assert bad.status_code == 400
-    good = client.post("/api/items", json={"name": "X", "category_id": cat["id"], "location_id": own["id"]})
-    assert good.status_code == 201
+def test_moving_an_item_keeps_its_code(client):
+    tub = _node(client, "subcategories", "TUB")
+    item = client.post("/api/items", json={
+        "name": "Tube", "subcategory_id": tub["id"],
+        "position_id": _position(client, "RnD-WH-C-1.1")["id"]}).json()
+    to = _position(client, "RnD-WH-A-2.3")
+    r = client.patch(f"/api/items/{item['id']}", json={"position_id": to["id"]})
+    assert (r.json()["sku"], r.json()["position_id"]) == ("HY-TUB-0001", to["id"])
 
 
 # ---------------------------------------------------------------------- scan
@@ -236,6 +239,12 @@ def test_a_scan_miss_is_a_normal_answer_not_an_error(client):
     r = client.post("/api/scan", json={"code": "UNKNOWN-1"})
     assert r.status_code == 200
     assert r.json() == {"found": False, "code": "UNKNOWN-1"}
+
+
+def test_scanning_a_rack_label_finds_the_position(client):
+    body = client.post("/api/scan", json={"code": "rnd-wh-a-0.1"}).json()
+    assert body["found"] is False
+    assert body["position"]["location_code"] == "RnD-WH-A-0.1"
 
 
 def test_scan_tolerates_scanner_whitespace(client):
@@ -489,17 +498,29 @@ def test_the_worker_survives_a_job_that_raises(no_printer, monkeypatch):
 
 
 def test_next_sku_previews_without_consuming_the_number(client):
-    area = client.post("/api/areas", json={"name": "Chemistry"}).json()
-    cat = client.post("/api/categories",
-                      json={"area_id": area["id"], "name": "Solvents"}).json()
-    url = f"/api/next-sku?category_id={cat['id']}"
-    assert client.get(url).json() == {"sku": "SOLV-0001"}
-    assert client.get(url).json() == {"sku": "SOLV-0001"}     # still unused
-    item = client.post("/api/items", json={"name": "Acetone", "category_id": cat["id"]}).json()
-    assert item["sku"] == "SOLV-0001"
-    assert client.get(url).json() == {"sku": "SOLV-0002"}
+    rea = _node(client, "subcategories", "REA")
+    mn = _node(client, "families", "MN")
+    url = f"/api/next-sku?subcategory_id={rea['id']}&family_id={mn['id']}"
+    assert client.get(url).json() == {"sku": "CH-REA-MN-0001"}
+    assert client.get(url).json() == {"sku": "CH-REA-MN-0001"}     # still unused
+    item = client.post("/api/items", json={"name": "KOH", "subcategory_id": rea["id"],
+                                           "family_id": mn["id"]}).json()
+    assert item["sku"] == "CH-REA-MN-0001"
+    assert client.get(url).json() == {"sku": "CH-REA-MN-0002"}
+    sub_only = client.get(f"/api/next-sku?subcategory_id={rea['id']}").json()
+    assert sub_only == {"sku": "CH-REA-0001"}
     assert client.get("/api/next-sku").json() == {"sku": "ITM-0001"}
-    assert client.get("/api/next-sku?category_id=9999").status_code == 404
+    assert client.get("/api/next-sku?subcategory_id=9999").status_code == 404
+
+
+def test_a_position_label_carries_its_location_code(client, con):
+    from synergyscan import app as appmod
+
+    pos = _position(client, "RnD-WH-A-0.1")
+    spec, _ = appmod._spec_for(con, appmod.PrintIn(position_id=pos["id"], symbology="qr"))
+    assert spec.lines == ["RnD-WH-A-0.1"]
+    assert (spec.barcode.symbology, spec.barcode.value) == ("qr", "RnD-WH-A-0.1")
+    assert client.post("/api/print/preview", json={"position_id": 999}).status_code == 404
 
 
 def test_item_label_carries_the_sku_but_not_the_product_name(client, con):
@@ -551,39 +572,36 @@ def test_editing_to_a_taken_sku_is_a_conflict(client):
     client.post("/api/items", json={"sku": "E-4", "name": "A"})
     b = client.post("/api/items", json={"sku": "E-5", "name": "B"}).json()
     assert client.patch(f"/api/items/{b['id']}", json={"sku": "E-4"}).status_code == 409
-    assert client.patch(f"/api/items/{b['id']}", json={"sku": "  "}).status_code == 400
+
+
+def test_a_blank_sku_on_edit_generates_a_new_one(client):
+    item = client.post("/api/items", json={"sku": "E-6", "name": "A"}).json()
+    pip = _node(client, "subcategories", "PIP")
+    r = client.patch(f"/api/items/{item['id']}", json={"sku": "", "subcategory_id": pip["id"]})
+    assert r.json()["sku"] == "HY-PIP-0001"
 
 
 # ------------------------------------------------------------------- archiving
-def _tree(client):
-    a = client.post("/api/areas", json={"name": "Area A"}).json()
-    c1 = client.post("/api/categories", json={"area_id": a["id"], "name": "Foam"}).json()
-    c2 = client.post("/api/categories", json={"area_id": a["id"], "name": "Felt"}).json()
-    loc = client.post("/api/locations", json={"area_id": a["id"], "name": "Shelf 1"}).json()
-    return a, c1, c2, loc
+def test_archiving_a_node_hides_its_branch_and_restoring_brings_it_back(client):
+    ch = _node(client, "macros", "CH")
+    client.patch(f"/api/macros/{ch['id']}", json={"archived": True})
+    assert all(s["macro_id"] != ch["id"] for s in client.get("/api/subcategories").json())
+    assert len(client.get("/api/families").json()) == 0            # all six were under CH
+    hidden = client.get("/api/subcategories?include_archived=true").json()
+    assert sum(s["hidden"] for s in hidden) == 6
+    client.patch(f"/api/macros/{ch['id']}", json={"archived": False})
+    assert len(client.get("/api/families").json()) == 6
 
 
-def test_archiving_an_area_archives_its_categories_and_locations(client):
-    a, _, _, _ = _tree(client)
-    client.patch(f"/api/areas/{a['id']}", json={"archived": True})
-    assert client.get("/api/categories").json() == []
-    assert client.get("/api/locations").json() == []
-
-
-def test_restoring_an_area_brings_back_only_what_it_archived(client):
-    a, _, c2, _ = _tree(client)
-    client.patch(f"/api/categories/{c2['id']}", json={"archived": True})   # on its own first
-    client.patch(f"/api/areas/{a['id']}", json={"archived": True})
-    client.patch(f"/api/areas/{a['id']}", json={"archived": False})
-    assert [c["name"] for c in client.get("/api/categories").json()] == ["Foam"]
-    assert [l["name"] for l in client.get("/api/locations").json()] == ["Shelf 1"]
-
-
-def test_a_category_cannot_be_restored_while_its_area_is_archived(client):
-    a, c1, _, loc = _tree(client)
-    client.patch(f"/api/areas/{a['id']}", json={"archived": True})
-    assert client.patch(f"/api/categories/{c1['id']}", json={"archived": False}).status_code == 400
-    assert client.patch(f"/api/locations/{loc['id']}", json={"archived": False}).status_code == 400
+def test_a_node_cannot_be_restored_while_its_parent_is_archived(client):
+    pos = _position(client, "RnD-WH-A-0.1")
+    client.patch(f"/api/positions/{pos['id']}", json={"archived": True})
+    client.patch(f"/api/units/{pos['unit_id']}", json={"archived": True})
+    r = client.patch(f"/api/positions/{pos['id']}", json={"archived": False})
+    assert r.status_code == 400 and "restore it first" in r.json()["detail"]
+    # The rest of the unit is hidden with it, so its labels no longer resolve.
+    body = client.post("/api/scan", json={"code": "RnD-WH-A-0.2"}).json()
+    assert body == {"found": False, "code": "RnD-WH-A-0.2"}
 
 
 def test_archived_items_are_listed_separately_and_can_be_restored(client):
@@ -603,10 +621,10 @@ def test_scanning_an_archived_item_points_at_it(client):
     assert body["archived_item"]["id"] == item["id"]
 
 
-def test_a_name_held_by_an_archived_row_says_so(client):
-    a = client.post("/api/areas", json={"name": "Old area"}).json()
-    client.patch(f"/api/areas/{a['id']}", json={"archived": True})
-    r = client.post("/api/areas", json={"name": "old area"})
+def test_a_code_held_by_an_archived_row_says_so(client):
+    hq = _node(client, "facilities", "HQ")
+    client.patch(f"/api/facilities/{hq['id']}", json={"archived": True})
+    r = client.post("/api/facilities", json={"code": "HQ", "name": "Again"})
     assert r.status_code == 409 and "archived" in r.json()["detail"]
     item = client.post("/api/items", json={"sku": "AR-3", "name": "X"}).json()
     client.patch(f"/api/items/{item['id']}", json={"archived": True})

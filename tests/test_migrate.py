@@ -196,3 +196,35 @@ def test_location_name_migration_disambiguates_clashing_names(tmp_path: Path):
     names = [r[0] for r in con.execute("SELECT name FROM locations ORDER BY id")]
     assert names == ["Shelf", "shelf (D2)", "Shelf"]
     con.close()
+
+
+def test_the_new_trees_install_over_an_existing_database(tmp_path: Path):
+    """An installed machine at 008, with the old Area > Category tree, a shelf and
+    an item in use: 009 adds the new lists and leaves all of that as it was."""
+    con = sqlite3.connect(tmp_path / "old.db", isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY,"
+                " name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))")
+    for num, path in migrations.available():
+        if num <= 8:
+            con.executescript(path.read_text(encoding="utf-8"))
+            con.execute("INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
+                        (num, path.name))
+    con.execute("INSERT INTO areas (name) VALUES ('Lab')")
+    con.execute("INSERT INTO categories (area_id, name, prefix) VALUES (1, 'Foam', 'FOAM')")
+    con.execute("INSERT INTO locations (area_id, name) VALUES (1, 'Shelf 1')")
+    con.execute("INSERT INTO items (sku, name, category_id, location_id)"
+                " VALUES ('FOAM-0001', 'Fe foam', 1, 1)")
+    con.execute("INSERT INTO stock_movements (item_id, delta, reason) VALUES (1, 3, 'receive')")
+
+    assert migrations.apply_all(con) == [9]
+
+    item = con.execute("SELECT * FROM stock_on_hand").fetchone()
+    assert (item["sku"], item["qty"], item["category_id"], item["location_id"]) == \
+        ("FOAM-0001", 3, 1, 1)                     # what an older release reads, intact
+    assert item["subcategory_id"] is None and item["position_id"] is None
+    assert con.execute("SELECT COUNT(*) FROM subcategories").fetchone()[0] == 56
+    assert con.execute("SELECT COUNT(*) FROM positions").fetchone()[0] == 44
+    assert con.execute("PRAGMA foreign_key_check").fetchall() == []
+    con.close()

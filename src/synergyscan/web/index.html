@@ -20,8 +20,8 @@
   <nav class="mainnav" aria-label="Sections">
     <a href="#scan" class="nav-link main" data-view="scan"><span>Scan</span></a>
     <a href="#stock" class="nav-link main" data-view="stock"><span>Stock</span></a>
-    <!-- Area > Category tree: shown under Stock, only while Stock is open. -->
-    <div id="nav" aria-label="Areas and categories"></div>
+    <!-- Macro-category > Subcategory tree: shown under Stock, only while Stock is open. -->
+    <div id="nav" aria-label="Macro-categories and subcategories"></div>
     <a href="#setup" class="nav-link main" data-view="setup"><span>Setup</span></a>
     <a href="#archive" class="nav-link main" data-view="archive"><span>Archive</span></a>
   </nav>
@@ -55,7 +55,7 @@
            spellcheck="false" placeholder="Scan a barcode">
   </div>
   <p class="scan-hint">
-    <span class="when-ready">Ready: scan a label, or type a SKU and press Enter.</span>
+    <span class="when-ready">Ready: scan a label, or type a code and press Enter.</span>
     <span class="when-idle">Click here before scanning.</span>
     <button id="btn-new-item" type="button" class="linkish">Add a new item</button>
   </p>
@@ -70,9 +70,10 @@
         <p id="item-where" class="crumbs"></p>
         <h2 id="item-name">—</h2>
         <dl class="meta">
-          <div><dt>SKU</dt><dd id="item-sku"></dd></div>
-          <div id="item-shelf-row"><dt>Shelf</dt><dd id="item-shelf"></dd></div>
+          <div><dt>Code</dt><dd id="item-sku"></dd></div>
+          <div id="item-location-row"><dt>Location</dt><dd id="item-location"></dd></div>
           <div id="item-lot-row"><dt>Lot</dt><dd id="item-lot"></dd></div>
+          <div id="item-tech-row"><dt>Tech. ref.</dt><dd id="item-tech"></dd></div>
         </dl>
       </div>
       <div class="qty-block">
@@ -92,6 +93,19 @@
         <button class="ok" data-reason="receive">Receive <span class="n">1</span> in</button>
         <button class="warn" data-reason="issue">Issue <span class="n">1</span> out</button>
       </div>
+      <p class="hint center">To move it, scan the rack label of its new position.</p>
+    </div>
+  </section>
+
+  <!-- Shown when a rack label is scanned with no item open: what is kept there. -->
+  <section id="position-panel" class="panel panel-focus" hidden>
+    <p id="pos-where" class="crumbs"></p>
+    <h2 id="pos-code"></h2>
+    <p id="pos-note" class="muted pos-note"></p>
+    <table id="pos-items" class="ledger"><tbody></tbody></table>
+    <div class="form-actions">
+      <button id="btn-pos-print" type="button">Print this rack label</button>
+      <button id="btn-pos-close" type="button">Close</button>
     </div>
   </section>
 
@@ -121,7 +135,7 @@
           <input id="new-name" type="text" placeholder="e.g. Fe foam, 60 ppi, 3 mm">
         </div>
         <div class="field">
-          <label for="new-sku">SKU</label>
+          <label for="new-sku">Code</label>
           <input id="new-sku" type="text" placeholder="Generated">
         </div>
         <div class="field">
@@ -133,24 +147,50 @@
     </fieldset>
 
     <fieldset class="group">
-      <legend>Where it's kept</legend>
+      <legend>Classification</legend>
       <div class="grid g-where">
         <div class="field">
-          <label for="new-area">Area</label>
-          <select id="new-area"><option value="">—</option></select>
+          <label for="new-macro">Macro-category</label>
+          <select id="new-macro"><option value="">—</option></select>
         </div>
         <span class="cascade" aria-hidden="true">›</span>
         <div class="field">
-          <label for="new-category">Category</label>
-          <select id="new-category"><option value="">—</option></select>
+          <label for="new-sub">Subcategory</label>
+          <select id="new-sub"><option value="">—</option></select>
         </div>
         <span class="cascade" aria-hidden="true">›</span>
         <div class="field">
-          <label for="new-location">Shelf</label>
-          <select id="new-location"><option value="">—</option></select>
+          <label for="new-family">Item family</label>
+          <select id="new-family"><option value="">None</option></select>
         </div>
       </div>
-      <p class="hint">Pick the area first: categories and shelves follow it.</p>
+      <p class="hint" id="new-code-hint">The code is built from these, e.g. HY-TUB-0001, or CH-REA-MN-0001 with a family. The family is optional.</p>
+    </fieldset>
+
+    <fieldset class="group">
+      <legend>Location</legend>
+      <div class="grid g-where4">
+        <div class="field">
+          <label for="new-facility">Facility</label>
+          <select id="new-facility"><option value="">—</option></select>
+        </div>
+        <span class="cascade" aria-hidden="true">›</span>
+        <div class="field">
+          <label for="new-larea">Area</label>
+          <select id="new-larea"><option value="">—</option></select>
+        </div>
+        <span class="cascade" aria-hidden="true">›</span>
+        <div class="field">
+          <label for="new-sunit">Storage unit</label>
+          <select id="new-sunit"><option value="">—</option></select>
+        </div>
+        <span class="cascade" aria-hidden="true">›</span>
+        <div class="field">
+          <label for="new-position">Position</label>
+          <select id="new-position"><option value="">—</option></select>
+        </div>
+      </div>
+      <p class="hint">Level 0 is the bottom shelf; positions count from the left. Moving an item later never changes its code.</p>
     </fieldset>
 
     <div class="group-pair">
@@ -170,8 +210,8 @@
       </fieldset>
 
       <fieldset class="group">
-        <legend>Supply</legend>
-        <div class="grid g-three">
+        <legend>Supply and references</legend>
+        <div class="grid g-two">
           <div class="field">
             <label for="new-supplier">Supplier</label>
             <input id="new-supplier" type="text" placeholder="Optional">
@@ -183,6 +223,10 @@
           <div class="field">
             <label for="new-lot">Lot</label>
             <input id="new-lot" type="text" placeholder="Optional">
+          </div>
+          <div class="field">
+            <label for="new-tech-ref">Technical reference</label>
+            <input id="new-tech-ref" type="text" maxlength="100" placeholder="Optional, e.g. vault code">
           </div>
         </div>
       </fieldset>
@@ -201,9 +245,11 @@
             </div>
             <div class="field">
               <label for="symbology">Code type</label>
+              <!-- QR first: the item codes are too long for a Code 128 that
+                   scans reliably on a 40 mm label (see the README). -->
               <select id="symbology">
-                <option value="code128">Code 128</option>
                 <option value="qr">QR code</option>
+                <option value="code128">Code 128</option>
                 <option value="code39">Code 39</option>
                 <option value="ean13">EAN-13</option>
               </select>
@@ -241,9 +287,16 @@
   <header class="page-head">
     <h2>Stock</h2>
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Search name, SKU or barcode" aria-label="Search">
-      <select id="filter-area" aria-label="Area"><option value="">All areas</option></select>
-      <select id="filter-category" aria-label="Category"><option value="">All categories</option></select>
+      <input id="search" type="search" placeholder="Search name, code or location" aria-label="Search">
+      <div class="filter-set" role="group" aria-label="Classification">
+        <select id="filter-macro" aria-label="Macro-category"><option value="">All macro-categories</option></select>
+        <select id="filter-sub" aria-label="Subcategory"><option value="">All subcategories</option></select>
+      </div>
+      <div class="filter-set" role="group" aria-label="Location">
+        <select id="filter-facility" aria-label="Facility"><option value="">All facilities</option></select>
+        <select id="filter-larea" aria-label="Area"><option value="">All areas</option></select>
+        <select id="filter-sunit" aria-label="Storage unit"><option value="">All units</option></select>
+      </div>
       <div class="chips" role="group" aria-label="Show only">
         <button class="chip chip-bad" id="tile-reorder" type="button" title="Show only items at or below their reorder level">
           <span class="n" id="count-reorder">–</span> to reorder</button>
@@ -257,7 +310,7 @@
     <div class="table-scroll">
     <table id="items" class="stock">
       <thead><tr>
-        <th>Item</th><th>Category and shelf</th><th>Level</th>
+        <th>Item</th><th>Classification and location</th><th>Level</th>
         <th class="num">On hand</th><th class="num">Reorder at</th><th><span class="sr-only">Actions</span></th>
       </tr></thead>
       <tbody></tbody>
@@ -271,16 +324,32 @@
   <header class="page-head">
     <div>
       <h2>Setup</h2>
-      <p class="lede">Each area of the lab or warehouse has its own categories and shelves.</p>
-    </div>
-    <div class="inline-add">
-      <label for="new-area-name" class="sr-only">New area name</label>
-      <input id="new-area-name" type="text" placeholder="New area, e.g. Battery Testing">
-      <button id="btn-add-area" class="primary">Add area</button>
+      <p class="lede">Two separate lists. The classification makes each item's code; the
+        location says where it is kept, and moving an item only changes that. A
+        classification code locks once items use it.</p>
     </div>
   </header>
-  <!-- Rendered by app.js: one block per area with its categories and shelves. -->
-  <div id="setup-areas"></div>
+  <!-- Both trees are rendered by app.js; every row opens the same edit dialog. -->
+  <section class="panel tree-panel">
+    <header class="tree-head">
+      <div>
+        <h3>Item classification</h3>
+        <p class="muted small">Macro-category › Subcategory › Item family (optional)</p>
+      </div>
+      <button id="btn-add-macro" type="button" class="push-right">Add macro-category</button>
+    </header>
+    <div id="setup-classes"></div>
+  </section>
+  <section class="panel tree-panel">
+    <header class="tree-head">
+      <div>
+        <h3>Locations</h3>
+        <p class="muted small">Facility › Area › Storage unit › Position. Each position gets a rack label to scan.</p>
+      </div>
+      <button id="btn-add-facility" type="button" class="push-right">Add facility</button>
+    </header>
+    <div id="setup-locations"></div>
+  </section>
 </div>
 
 <div id="view-archive" class="view" hidden>
@@ -288,8 +357,8 @@
     <div>
       <h2>Archive</h2>
       <p class="lede">Archived things are hidden everywhere else, but nothing is deleted.
-        Restore brings them back with their history. Restoring an area also restores the
-        categories and shelves archived with it.</p>
+        Restore brings them back with their history. Everything under an archived entry is
+        hidden with it and comes back when it is restored.</p>
     </div>
   </header>
   <section class="panel">
@@ -297,15 +366,11 @@
     <table id="arch-items" class="ledger"><tbody></tbody></table>
   </section>
   <section class="panel">
-    <h3 class="panel-title">Areas</h3>
-    <table id="arch-areas" class="ledger"><tbody></tbody></table>
+    <h3 class="panel-title">Classification</h3>
+    <table id="arch-classes" class="ledger"><tbody></tbody></table>
   </section>
   <section class="panel">
-    <h3 class="panel-title">Categories</h3>
-    <table id="arch-categories" class="ledger"><tbody></tbody></table>
-  </section>
-  <section class="panel">
-    <h3 class="panel-title">Shelves</h3>
+    <h3 class="panel-title">Locations</h3>
     <table id="arch-locations" class="ledger"><tbody></tbody></table>
   </section>
 </div>
@@ -337,7 +402,8 @@
     <div id="overlay-spinner" class="spinner" aria-hidden="true"></div>
     <h2 id="overlay-title"></h2>
     <p id="overlay-text" class="muted"></p>
-    <div id="overlay-actions" class="row gap"></div>
+    <form id="overlay-form" class="overlay-form" hidden></form>
+    <div id="overlay-actions" class="row gap wrap"></div>
   </div>
 </div>
 
