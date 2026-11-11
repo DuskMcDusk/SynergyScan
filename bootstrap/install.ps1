@@ -21,8 +21,13 @@
     GitHub owner/name to install from.
 
 .PARAMETER Channel
-    stable (default) or beta. Sets which channel file this machine follows,
-    which is how you make one PC a canary.
+    stable or beta. Sets which channel file this machine follows, which is how
+    you make one PC a canary. Left out, the installer uses the channel this PC
+    already follows (stable on a new PC).
+
+    It never moves a PC backwards: if this PC already runs the channel's
+    release or a newer one, it keeps it and only refreshes the launcher and
+    helper scripts. Going back is rollback.bat.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install.ps1
@@ -55,12 +60,38 @@ function Say  { param($m) Write-Host "  $m" }
 function Step { param($m) Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Fail { param($m) Write-Host "`nX  $m" -ForegroundColor Red; exit 1 }
 function Good { param($m) Write-Host "OK $m" -ForegroundColor Green }
+function Warn { param($m) Write-Host "!  $m" -ForegroundColor Yellow }
+
+# Zero-padded so an ordinal string compare is a numeric compare; $null for
+# anything that is not a release version (same as rollback.ps1).
+function VersionKey {
+    param($n)
+    if ([string]$n -notmatch '^\d{4}\.\d{1,2}\.\d{1,2}-\d+$') { return $null }
+    (($n -split '[.-]' | ForEach-Object { '{0:D6}' -f [int]$_ }) -join '.')
+}
+
+# Without -Channel, keep following the channel this PC already follows, or
+# re-running the installer (to refresh the launcher, say) would quietly turn a
+# canary back into a stable machine and install stable's older release on it.
+$ChannelName = $Channel
+$configPath = Join-Path $InstallRoot 'data\config.json'
+if (-not $PSBoundParameters.ContainsKey('Channel') -and (Test-Path $configPath)) {
+    try {
+        $recorded = (Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json).channel_url
+        if ($recorded -is [string] -and $recorded.StartsWith('https://')) {
+            $ChannelUrl = $recorded
+            $ChannelName = [IO.Path]::GetFileNameWithoutExtension($recorded)
+        }
+    } catch {
+        Warn "Could not read $configPath; using the $ChannelName channel."
+    }
+}
 
 Write-Host ''
 Write-Host '  SynergyScan installer' -ForegroundColor White
 Write-Host '  ---------------------'
 Say "Installing to      $InstallRoot"
-Say "Release channel    $Channel"
+Say "Release channel    $ChannelName"
 Say "Source repository  $Repo"
 
 # --------------------------------------------------------------- 1. folders
@@ -120,73 +151,126 @@ if (-not $version -or -not $zipUrl -or -not $sha) {
 }
 Good "release $version"
 
-# -------------------------------------------------------------- 4. download
-Step "Downloading release $version"
-$zipPath = Join-Path $InstallRoot "staging\synergyscan-$version.zip"
-try {
-    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
-} catch {
-    Fail "Could not download the release.`n   $($_.Exception.Message)"
+# -------------------------------------------------- 3b. never move backwards
+# Updates only move forward; going back is rollback.bat. If this PC already
+# runs this release or a newer one, keep it: installing an older release would
+# run old code on a database that newer migrations have already changed, and
+# reinstalling the same one would delete the files of the release that is
+# running. Only the launcher and helper scripts are refreshed, from it.
+$pointerPath = Join-Path $InstallRoot 'current.txt'
+$running = $null
+if (Test-Path $pointerPath) { $running = ([string](Get-Content $pointerPath -Raw)).Trim() }
+$runningPy = $null
+if ($running) { $runningPy = Join-Path $InstallRoot "versions\$running\.venv\Scripts\python.exe" }
+$keep = $false
+if ($runningPy -and (Test-Path $runningPy) -and (VersionKey $running) -and (VersionKey $version)) {
+    $keep = [string]::CompareOrdinal((VersionKey $version), (VersionKey $running)) -le 0
 }
-
-# Integrity check, not a signature: over HTTPS the realistic risk is a
-# truncated or corrupted download rather than a substituted file.
-$got = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
-if ($got -ne $sha.ToLower()) {
-    Remove-Item $zipPath -Force
-    Fail "The download is corrupt.`n   expected $sha`n   got      $got`n   Try again."
-}
-Good "downloaded and verified ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
-
-# ---------------------------------------------------------------- 5. unpack
-Step 'Unpacking'
-$releaseDir = Join-Path $InstallRoot "versions\$version"
-if (Test-Path $releaseDir) { Remove-Item -Recurse -Force $releaseDir }
-Expand-Archive -Path $zipPath -DestinationPath $releaseDir -Force
-if (-not (Test-Path (Join-Path $releaseDir 'pyproject.toml'))) {
-    Fail 'The archive does not look like a SynergyScan release.'
-}
-Good "unpacked to $releaseDir"
-
-# ------------------------------------------------------------------ 6. venv
-Step 'Installing dependencies (a minute or two the first time)'
-Push-Location $releaseDir
-try {
-    # --frozen installs exactly what uv.lock pins, so this machine gets the
-    # versions that were tested rather than whatever resolves today.
-    & $uvExe sync --frozen --no-dev
-    if ($LASTEXITCODE -ne 0) { Fail 'Could not install the dependencies.' }
-} finally {
-    Pop-Location
-}
-$venvPy = Join-Path $releaseDir '.venv\Scripts\python.exe'
-if (-not (Test-Path $venvPy)) { Fail "No interpreter at $venvPy after setup." }
-Good 'dependencies installed'
-
-# ------------------------------------------------------------- 7. self-test
-Step 'Checking the release actually works'
 $env:SYNERGYSCAN_DATA = Join-Path $InstallRoot 'data'
-& $venvPy -m synergyscan.selfupdate.selftest | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    & $venvPy -m synergyscan.selfupdate.selftest
-    Fail 'The self-test failed, so this release was not activated. Nothing has been changed.'
-}
-Good 'self-test passed'
+if ($keep) {
+    Good "this PC already runs $running; keeping it (the $ChannelName channel offers $version)"
+    $version = $running
+    $releaseDir = Join-Path $InstallRoot "versions\$running"
+    $venvPy = $runningPy
+} else {
+    # -------------------------------------------------------------- 4. download
+    Step "Downloading release $version"
+    $zipPath = Join-Path $InstallRoot "staging\synergyscan-$version.zip"
+    try {
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+    } catch {
+        Fail "Could not download the release.`n   $($_.Exception.Message)"
+    }
 
-Step 'Setting up the database'
-& $venvPy -m synergyscan.selfupdate.migrate | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    & $venvPy -m synergyscan.selfupdate.migrate
-    Fail 'The database could not be set up. Nothing has been activated.'
-}
-Good 'database ready'
+    # Integrity check, not a signature: over HTTPS the realistic risk is a
+    # truncated or corrupted download rather than a substituted file.
+    $got = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $sha.ToLower()) {
+        Remove-Item $zipPath -Force
+        Fail "The download is corrupt.`n   expected $sha`n   got      $got`n   Try again."
+    }
+    Good "downloaded and verified ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
 
-# --------------------------------------------------------------- 8. pointer
-Step 'Activating this release'
-# Written last, and only after every check above passed. Until this line, the
-# release is inert.
-Set-Content -Path (Join-Path $InstallRoot 'current.txt') -Value $version -Encoding ascii
-Good "current.txt now reads $version"
+    # ---------------------------------------------------------------- 5. unpack
+    Step 'Unpacking'
+    $releaseDir = Join-Path $InstallRoot "versions\$version"
+    if (Test-Path $releaseDir) { Remove-Item -Recurse -Force $releaseDir }
+    Expand-Archive -Path $zipPath -DestinationPath $releaseDir -Force
+    if (-not (Test-Path (Join-Path $releaseDir 'pyproject.toml'))) {
+        Fail 'The archive does not look like a SynergyScan release.'
+    }
+    Good "unpacked to $releaseDir"
+
+    # ------------------------------------------------------------------ 6. venv
+    Step 'Installing dependencies (a minute or two the first time)'
+    Push-Location $releaseDir
+    try {
+        # --frozen installs exactly what uv.lock pins, so this machine gets the
+        # versions that were tested rather than whatever resolves today.
+        & $uvExe sync --frozen --no-dev
+        if ($LASTEXITCODE -ne 0) { Fail 'Could not install the dependencies.' }
+    } finally {
+        Pop-Location
+    }
+    $venvPy = Join-Path $releaseDir '.venv\Scripts\python.exe'
+    if (-not (Test-Path $venvPy)) { Fail "No interpreter at $venvPy after setup." }
+    Good 'dependencies installed'
+
+    # ------------------------------------------------------------- 7. self-test
+    Step 'Checking the release actually works'
+    & $venvPy -m synergyscan.selfupdate.selftest | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        & $venvPy -m synergyscan.selfupdate.selftest
+        Fail 'The self-test failed, so this release was not activated. Nothing has been changed.'
+    }
+    Good 'self-test passed'
+
+    Step 'Setting up the database'
+    & $venvPy -m synergyscan.selfupdate.migrate | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        & $venvPy -m synergyscan.selfupdate.migrate
+        Fail 'The database could not be set up. Nothing has been activated.'
+    }
+    Good 'database ready'
+
+    # --------------------------------------------------------------- 8. pointer
+    Step 'Activating this release'
+    # Written last, and only after every check above passed. Until this line, the
+    # release is inert.
+    Set-Content -Path (Join-Path $InstallRoot 'current.txt') -Value $version -Encoding ascii
+    Good "current.txt now reads $version"
+}
+
+# ------------------------------------------------------------ 8b. channel
+# Recorded in data\config.json, or a machine installed with -Channel beta would
+# take this one release from beta and then quietly follow stable again. Only an
+# explicit -Channel changes it (see the top of this script for the default).
+# stable is the default URL, so it is recorded by removing the key rather than
+# by pinning today's URL. The release writes the file (plain UTF-8, other keys
+# kept); PowerShell 5.1 would add a BOM. The result is read back rather than
+# trusted: a release older than this command runs `python -m` on a module with
+# no entry point, which does nothing and still exits 0.
+if ($PSBoundParameters.ContainsKey('Channel')) {
+    Step "Following the $Channel channel"
+    $want = $null
+    if ($Channel -eq 'stable') {
+        & $venvPy -m synergyscan.config unset channel_url
+    } else {
+        $want = $ChannelUrl
+        & $venvPy -m synergyscan.config set channel_url $ChannelUrl
+    }
+    $now = $null
+    try {
+        $now = (Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json).channel_url
+    } catch { $now = '(unreadable)' }
+    if ($now -eq $want) {
+        Good "updates now come from $Channel"
+    } else {
+        Warn "Could not record the channel in $configPath."
+        Warn "This PC will NOT follow $Channel until channel_url there is set by hand:"
+        if ($want) { Warn "  `"channel_url`": `"$want`"" } else { Warn '  remove the channel_url line' }
+    }
+}
 
 # ------------------------------------------------------------- 9. bootstrap
 Step 'Installing the launcher and helper scripts'
