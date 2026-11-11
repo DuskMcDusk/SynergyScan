@@ -67,6 +67,16 @@ def config_path() -> Path:
     return data_dir() / "config.json"
 
 
+# Also written by bootstrap/launcher.py and bootstrap/rollback.ps1, which cannot
+# import this module; tests/test_selfupdate.py checks all three agree.
+BLOCKED_VERSIONS = "blocked_versions.txt"
+
+
+def blocked_versions_path() -> Path:
+    """Releases the update check must not reinstall (see selfupdate.check)."""
+    return data_dir() / BLOCKED_VERSIONS
+
+
 def backups_dir() -> Path:
     d = data_dir() / "backups"
     d.mkdir(parents=True, exist_ok=True)

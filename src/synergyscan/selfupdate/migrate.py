@@ -52,11 +52,41 @@ def backup(db_path: Path, backups_dir: Path, tag: str = "preupdate") -> Path | N
 
 
 def restore(backup_path: Path, db_path: Path) -> None:
-    """Put a backup back. Removes stale WAL sidecars so SQLite cannot mix them."""
-    for sidecar in (db_path.with_name(db_path.name + "-wal"),
-                    db_path.with_name(db_path.name + "-shm")):
-        sidecar.unlink(missing_ok=True)
-    shutil.copy2(backup_path, db_path)
+    """Put a backup back through SQLite's backup API.
+
+    Replacing the file underneath a process that still has it open (the UI
+    update path) fails on Windows or corrupts that process's WAL state. The
+    backup API writes through SQLite's own locking, so it is safe either way.
+
+    The backup is opened read-only and checked first: a plain connect would
+    quietly create an empty database for a missing file, and restoring that
+    would wipe the live one while reporting success. If the live file is too
+    damaged for the backup API to write into, fall back to a file copy -
+    a broken database is exactly when a restore matters most.
+    """
+    if not backup_path.is_file():
+        raise FileNotFoundError(f"backup {backup_path} is missing")
+    src = sqlite3.connect(f"file:{backup_path.as_posix()}?mode=ro", uri=True)
+    try:
+        check = src.execute("PRAGMA quick_check").fetchone()[0]
+        if check != "ok":
+            raise sqlite3.DatabaseError(f"backup {backup_path} is damaged: {check}")
+        try:
+            dst = sqlite3.connect(db_path, timeout=30.0)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        except sqlite3.DatabaseError:
+            log.warning("could not restore into %s through SQLite; copying the file",
+                        db_path, exc_info=True)
+            src.close()
+            for sidecar in (db_path.with_name(db_path.name + "-wal"),
+                            db_path.with_name(db_path.name + "-shm")):
+                sidecar.unlink(missing_ok=True)
+            shutil.copy2(backup_path, db_path)
+    finally:
+        src.close()
     log.warning("restored database from %s", backup_path)
 
 

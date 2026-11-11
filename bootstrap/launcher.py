@@ -47,6 +47,7 @@ VERSION_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}-\d+$")
 
 CRASH_WINDOW_S = 30               # "immediately" means within this many seconds
 CRASH_LIMIT = 3                   # this many fast crashes triggers a rollback
+BLOCK_SECONDS = 24 * 3600         # how long a crashed release is not reinstalled
 RESTART_PAUSE_S = 3
 DEFAULT_PORT = 8000
 
@@ -125,6 +126,19 @@ def rollback(from_version: str) -> str | None:
     if not older:
         return None
     target = older[0]
+    try:
+        # Recorded before the pointer moves. The app's update check skips
+        # anything listed here, so the older release does not immediately
+        # reinstall the one that just failed. The block expires: the crash may
+        # have been the machine (a busy port, a locked file) rather than the
+        # release, and a block nothing ever lifts would pin the PC to the old
+        # release until a newer one ships. The name must match
+        # synergyscan.paths.BLOCKED_VERSIONS.
+        until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + BLOCK_SECONDS))
+        with (DATA / "blocked_versions.txt").open("a", encoding="utf-8") as f:
+            f.write(f"{from_version} {until}\n")
+    except OSError:
+        log.exception("could not record %s as blocked", from_version)
     write_pointer(target)
     log.critical("release %s failed to start %d times; rolled back to %s",
                  from_version, CRASH_LIMIT, target)
